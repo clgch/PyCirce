@@ -9,9 +9,9 @@ import numpy as np
 import copy
 
 
-class CirceECME:
+class CirceEM:
     """
-    Expectation Conditional Maximisation Either (ECME) algorithm for probabilistic inversion of thermohydraulic correlation.
+    Expectation Conditional (EM) algorithm for probabilistic inversion of thermohydraulic correlation.
     """
 
     def __init__(
@@ -64,9 +64,9 @@ class CirceECME:
 
 
     @staticmethod
-    def _one_step_ecme(mean, cov, h, z_exp, z_nom, sig_eps, n):
+    def _one_step_em(mean, cov, h, z_exp, z_nom, sig_eps, n):
         """
-        Compute one iteration of the ECME iterative algorithm and returns the updated mean and covariance
+        Compute one iteration of the EM iterative algorithm and returns the updated mean and covariance
         """
         b = []
         S = []
@@ -81,43 +81,12 @@ class CirceECME:
             S.append(cov @ h_i @ h_i.T @ cov / (h_i.T @ cov @ h_i + sig_eps[i] ** 2))
 
             delta_cov.append(b[-1] @ b[-1].T - S[-1])
-        
-        cov_new = copy.deepcopy(cov) + np.mean(delta_cov, axis=0)  
 
-        #print(f"cov_new = {cov_new}")
+        delta_mean = np.mean(b, axis=0)
 
-        for i in range(n):
-            h_i = h[:, i].reshape(-1, 1)
-            H_tilde_list.append(h_i @ h_i.T /(h_i.T @ cov_new @ h_i + sig_eps[i] ** 2))
-        
-        H_tilde = np.sum(H_tilde_list, axis=0)
-        #H_tilde = 0.5 * (H_tilde + H_tilde.T) 
+        cov_new = copy.deepcopy(cov) + np.mean(delta_cov, axis=0) - delta_mean @ delta_mean.T  
+        mean_new = copy.deepcopy(mean) + delta_mean
 
-        #L = np.linalg.cholesky(H_tilde)
-        #L_inv = np.linalg.inv(L)
-        #H_tilde_inv = L_inv.T @ L_inv
-
-        ### Computation of the Moore Penrose inverse of H_tilde ###
-
-        # Compute the SVD of H_tilde
-        U, s, Vt = np.linalg.svd(H_tilde, full_matrices=False)
-
-        # Compute the pseudoinverse of the diagonal matrix s
-        s_pseudo = np.zeros_like(s)
-
-        non_zero = s > 1e-10  # Threshold for non-zero singular values
-        s_pseudo[non_zero] = 1 / s[non_zero]
-
-        # Compute Moore Penrose inverse
-        H_plus = Vt.T @ np.diag(s_pseudo) @ U.T
-
-        mean_new = 0
-        for i in range(n):
-            h_i = h[:, i]
-            mean_new += H_plus @ h_i * (z_exp[i] - z_nom[i]) / (h_i.T @ cov_new @ h_i + sig_eps[i] ** 2) 
-            #mean_new += H_tilde_inv @ h_i * (z_exp[i] - z_nom[i])
-
-        #print(f"mean_new = {mean_new}")
         return mean_new.reshape(-1, 1), cov_new
      
     @staticmethod
@@ -142,7 +111,7 @@ class CirceECME:
 
         loglik_list = [self._loglik(self.initial_mean, self.initial_cov, self.h, self.z_exp, self.z_nom, self.sig_eps, n)]  
 
-        mean_new, cov_new = self._one_step_ecme(self.initial_mean, self.initial_cov, self.h, self.z_exp, self.z_nom, self.sig_eps, n)
+        mean_new, cov_new = self._one_step_em(self.initial_mean, self.initial_cov, self.h, self.z_exp, self.z_nom, self.sig_eps, n)
 
         cov_list += [cov_new]
         mean_list += [mean_new]
@@ -162,9 +131,9 @@ class CirceECME:
         while (err_cov > self.tolerance or err_mean > self.tolerance) and iterator < self.niter :
             
             loglik_list += [self._loglik(mean_list[-1], cov_list[-1], self.h, self.z_exp, self.z_nom, self.sig_eps, n)] 
-            
-            mean_new, cov_new = self._one_step_ecme(self.initial_mean, self.initial_cov, self.h, self.z_exp, self.z_nom, self.sig_eps, n)
-            
+
+            mean_new, cov_new = self._one_step_em(self.initial_mean, self.initial_cov, self.h, self.z_exp, self.z_nom, self.sig_eps, n)
+
             cov_list += [cov_new]
             mean_list += [mean_new]
 
