@@ -27,6 +27,8 @@ bleuEDF = "#10367a"
 # theta = [theta_1, theta_1] is a Gaussian centered in [0.8, 0.3] with a covariance matrix # # # sampled from an inverse Wishart distribution whose hyperparameters are fitted on a dataset of # size 5.
 
 
+
+
 def dittus_boelter_corr(x):
     """
     Helper function that computes the Nusselt number using the Dittus Boelter correlation
@@ -34,17 +36,21 @@ def dittus_boelter_corr(x):
 
     P = x[:, 0]
     G = x[:, 1]
-    Tf = x[:, 2]
+    Tp = x[:, 2]
+    D = x[:, 3]
 
-    lambda_f = cp.CoolProp.PropsSI('L', 'T', Tf, 'P', P, 'IF97::Water') * 1e-3
-    mu_f = cp.CoolProp.PropsSI('V', 'T', Tf, 'P', P, 'IF97::Water') 
-    c_p = cp.CoolProp.PropsSI('C', 'T', Tf, 'P', P, 'IF97::Water')
+    Tsat = cp.CoolProp.PropsSI('T', 'P', P, 'Q', 0, 'HEOS::Water') 
+    Tf = (Tsat + Tp) / 2
 
-    return 0.023 * (G * 8 * 1e-3 / mu_f) ** 0.8 * (c_p * mu_f / lambda_f) ** 0.4
+    lambda_f = cp.CoolProp.PropsSI('L', 'T', Tf, 'P', P, 'HEOS::Water') * 1e-3
+    mu_f = cp.CoolProp.PropsSI('V', 'T', Tf, 'P', P, 'HEOS::Water') 
+    c_p = cp.CoolProp.PropsSI('C', 'T', Tf, 'P', P, 'HEOS::Water')
+
+    return 0.023 * (lambda_f/ D)  * (G * D / mu_f) ** 0.8 * (c_p * mu_f / lambda_f) ** 0.4
 
 def grad_log_db_corr(x):
     step = 1e-5
-    nabla = np.zeros((x.shape[0],3))
+    nabla = np.zeros((x.shape[0], 4))
 
     for i in range(3):
         xmin = copy.deepcopy(x)
@@ -67,31 +73,67 @@ random.seed()
 
 # 1) Variance formula for uncertainties propagation on the  
 
-X = pd.read_csv("./examples/becker_design.csv").values[:, 1:]
+n = 315
 
-n = X.shape[0]
+X = np.zeros((n, 4))
+X[:, :3] = pd.read_csv("./examples/becker_design.csv").values[:, 1:]
+X[:, 3] = np.repeat(8e-3, n)
 
-std_X = np.zeros((n, 3))
+std_X = np.zeros((n, 4))
 
 std_X[:, 0] = np.repeat(20, n)
-std_X[:, 1] = 0.02 * X[:, 1]
-std_X[:, 2] = 0.02 * X[:, 2]
+std_X[:, 1] = 0.02 * X[:, 1] 
+std_X[:, 2] = 0.02 * X[:, 2] / np.sqrt(3) 
+std_X[:, 3] = 4e-3 / np.sqrt(3)
 
+#std_X = 1e-2 * std_X
 
 nabla_design = grad_log_db_corr(X)
 
-std_log_nu = np.sqrt(np.sum(nabla_design ** 2  * std_X ** 2, axis=1) + np.log10(dittus_boelter_corr(X)) ** 2 * 0.01 ** 2) 
+# + np.log10(dittus_boelter_corr(X)) ** 2 * 0.01 ** 2
 
-print(std_log_nu.shape)
+std_log_nu = np.sqrt(np.sum(nabla_design ** 2  * std_X ** 2, axis=1)) 
+
+# 2 Monte-Carlo based propagation of uncertainties  
+
+q975 = np.zeros(n)
+q0025 = np.zeros(n)
+h_med = np.zeros(n)
+
+N = 1000
+
+for i in range(n): 
+
+    m = X[i, :]
+    s = std_X[i, :]
+
+
+    X_MC = np.zeros((N, 4))
+
+    X_MC[:, 0] = m[0] + np.random.normal(0, s[0], size=N)
+    X_MC[:, 1] = m[1] + np.random.normal(0, s[1], size=N)
+    X_MC[:, 2] = m[2] + np.random.uniform(-s[2] * np.sqrt(3) , s[2] * np.sqrt(3), size=N)
+    X_MC[:, 3] = 8e-3 + np.random.uniform(-s[3] * np.sqrt(3) , s[3] * np.sqrt(3), size=N)
+    
+    z_MC =  np.log10(dittus_boelter_corr(X_MC)) 
+    # + np.random.normal(0, 0.01 * np.log10(dittus_boelter_corr(X_MC)), size=N)
+
+    q975[i] = np.quantile(z_MC, 0.975)
+    q0025[i] = np.quantile(z_MC, 0.025)
+    h_med[i] = np.median(z_MC)
+
 
 Nu_exp = pd.read_csv("./examples/becker_experiments.csv").values[:, 1]
-Nu_nom = np.log10(dittus_boelter_corr(X))
+Nu_nom = np.log10(dittus_boelter_corr(X)) 
 
-plt.figure(figsize=(14, 8))
-plt.errorbar(Nu_nom, Nu_exp, yerr=2 * std_log_nu, fmt='o', capsize=5, color=rougeCEA, label=r"$\log_{10}(Nu)^{\rm exp}$")
-plt.plot(Nu_nom, Nu_nom, '+', color=bleuEDF, label=r"$\log_{10}(Nu)^{\rm DB}$")
-plt.xlabel(r"$\log_{10}(Nu)^{\rm DB}$")
-plt.ylabel(r"$\log_{10}(Nu)^{\rm exp}$")
+plt.figure(figsize=(14, 8)) 
+plt.errorbar(Nu_nom, h_med, yerr=(h_med - q0025, q975 - h_med), fmt='o', capsize=5, color=bleuEDF, alpha=0.7, label=r"Monte-Carlo")
+plt.errorbar(Nu_nom, Nu_nom, yerr=1.96 * std_log_nu, fmt='o', capsize=5, color=rougeCEA, alpha=0.7, label=r"Variance formula") 
+#plt.plot(Nu_nom, Nu_nom, '+', color=bleuEDF, label=r"$\log_{10}(Nu)^{\rm DB}$")
+#plt.plot(Nu_nom, h_med, '*', color=bleuEDF, alpha=0.7)
+#plt.plot(np.arange(n), Nu_nom - h_med, '*',  color=bleuEDF, alpha=0.7)
+plt.xlabel(r"$\log_{10}(h)$")
+plt.ylabel(r"$g_{\rm DB}(x)$")
 plt.legend()
 plt.tight_layout()
 plt.show()
