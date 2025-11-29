@@ -94,6 +94,21 @@ def generate_data_becker(data, seed):
 
     return 0.023 * np.power((lambda_f / D), theta[:, 0])  * np.power((G * D / mu_f), theta[:, 1]) * np.power((c_p * mu_f / lambda_f), theta[:, 2])
 
+def compute_h(x):
+
+    P = x[:, 0]
+    G = x[:, 1]
+    Tp = x[:, 2]
+    D = x[:, 3]
+
+    Tsat = cp.CoolProp.PropsSI('T', 'P', P, 'Q', 0, 'HEOS::Water') 
+    Tf = (Tsat + Tp) / 2
+
+    lambda_f = cp.CoolProp.PropsSI('L', 'T', Tf, 'P', P, 'HEOS::Water') * 1e-3
+    mu_f = cp.CoolProp.PropsSI('V', 'T', Tf, 'P', P, 'HEOS::Water') 
+    c_p = cp.CoolProp.PropsSI('C', 'T', Tf, 'P', P, 'HEOS::Water')
+
+    return np.log10(lambda_f / D), np.log10((G * D / mu_f)), np.log10((c_p * mu_f / lambda_f))
 
 
 np.random.seed(0)
@@ -115,8 +130,8 @@ idx = quantization_fn(m = n)
 X_sp = X[idx, :]
 support_points = pd.DataFrame(X[idx, :])
 
-z_sim = np.log10(generate_data_becker(X[idx, :], 0)) * (1 + np.random.normal(0, 0.01, 20))
-h = np.log10(dittus_boelter_corr(X[idx, :]))
+z_sim = np.log10(generate_data_becker(X_sp, 0)) * (1 + np.random.normal(0, 0.01, 20))
+h = np.log10(dittus_boelter_corr(X_sp))
 
 
 #plt.plot(h, z_sim, '*')
@@ -145,7 +160,7 @@ nabla_design = grad_log_db_corr(X_sp)
 
 std_log_nu = np.sqrt(np.sum(nabla_design ** 2  * std_X ** 2, axis=1) + np.log10(dittus_boelter_corr(X_sp)) ** 2 * 0.01 ** 2) 
 
-# 2 Monte-Carlo based propagation of uncertainties  
+# 2) Monte-Carlo based propagation of uncertainties  
 
 q975 = np.zeros(n)
 q0025 = np.zeros(n)
@@ -188,63 +203,38 @@ plt.legend()
 plt.tight_layout()
 plt.show()
 
-plt.figure(figsize=(14, 8)) 
-plt.plot(Nu_nom, (q975 - q0025) / (1.96 * std_log_nu), '*')
-plt.tight_layout()
-plt.show()
+# plt.figure(figsize=(14, 8)) 
+# plt.plot(Nu_nom, (q975 - q0025) / (1.96 * std_log_nu), '*')
+# plt.tight_layout()
+# plt.show()
 
-h = np.zeros((2, n))
+ # 3) Noisy CIRCE estimation on simulated data 
 
-#h[0, :] = np.repeat(1, n)
-h = pd.read_csv("./examples/becker_experiments.csv").values[:, 2:].T
+N = 500
 
-em_diag = pyc.CirceEMdiag(initial_mean=[0.8, 0.4], initial_cov=np.identity(2), h=h, z_exp=Nu_exp, z_nom=Nu_nom, sig_eps=std_log_nu, niter=3000)
+h = np.zeros((3, N, n))
 
-mean, cov, loglik = em_diag.estimate()
+for i in range(n): 
 
-print(f"mu = {mean[-1]}")
-print(f"sig2 = {np.diag(cov[-1])}")
+    m = X_sp[i, :]
+    s = std_X[i, :]
+
+    X_MC = np.zeros((N, 4))
+
+    X_MC[:, 0] = m[0] + np.random.normal(0, s[0], size=N)
+    X_MC[:, 1] = m[1] + np.random.normal(0, s[1], size=N)
+    X_MC[:, 2] = m[2] + np.random.uniform(-s[2] * np.sqrt(3) , s[2] * np.sqrt(3), size=N)
+    X_MC[:, 3] = 8e-3 + np.random.uniform(-s[3] * np.sqrt(3) , s[3] * np.sqrt(3), size=N)
+
+    h[:, :, i] = compute_h(X_MC)
+
+sig_eps = np.random.normal(0, 0.01, 20) * np.log10(dittus_boelter_corr(X_sp))
+z_sim = np.log10(generate_data_becker(X_sp, 0)) + sig_eps
 
 
-s = list(range(315))
-random.shuffle(s)
-idx = s[:40]
+noisy_circe =  pyc.NoisyCirceDiag(initial_mean=[1, 0.8, 0.3], initial_cov=np.identity(3), h=h, z_exp=z_sim, z_nom=np.repeat(np.log10(0.023), n), sig_eps=sig_eps)
 
-# Load 1 values of log(Re) and log(Pr) 
-X = pd.read_csv("./examples/becker_experiments.csv").values[idx, 2:]
-
-cov = np.linalg.inv((X.T @ X)) * 0.1 ** 2
-
-std_devs = np.sqrt(np.diag(cov))
-outer_product = np.outer(std_devs, std_devs)
-
-corr = cov / outer_product
-
-nu = 5 + 2 + 2  
-Psi = cov 
-
-# Sample a covariance matrix for theta
-#gamma_true = invwishart.rvs(nu, Psi)
-gamma_true = np.diag(np.array([2,  7]))
-mu_true = np.array([0.8, 0.3])
-
-print(gamma_true)
-
-# Load 15 values of log(Re) and log(Pr) 
-s = list(range(315))
-random.shuffle(s)
-idx = s[:15]
-
-X = pd.read_csv("./examples/becker_experiments.csv").values[idx, 2:]
-
-theta_sample = np.random.multivariate_normal(mu_true, gamma_true, size=15)
-epsilon = np.random.normal(loc=0, scale=0.1, size=15)
-
-Nu_exp = np.sum(X * theta_sample, axis=1) + np.log10(0.0023) + epsilon
-Nu_nom = np.sum(X * np.array([0.8, 0.3]), axis=1) + np.log10(0.0023)
-
-h = X.T
-
+mu, gamma = noisy_circe.estimate()
 
 # ecme = pyc.CirceECME(initial_mean=[0.8, 0.3], initial_cov=np.identity(2), h=h, z_exp=Nu_exp, z_nom=Nu_nom, sig_eps=np.repeat(0.1, 15))
 
