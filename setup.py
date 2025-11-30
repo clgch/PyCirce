@@ -43,5 +43,9 @@ classifiers=[
 ],
 install_requires=[
 "numpy",
+"pandas",
+"coolprop",
+"matplotlib",
+"kernax"
 ],
 )
