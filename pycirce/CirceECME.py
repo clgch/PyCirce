@@ -163,7 +163,7 @@ class CirceECME:
             
             loglik_list += [self._loglik(mean_list[-1], cov_list[-1], self.h, self.z_exp, self.z_nom, self.sig_eps, n)] 
             
-            mean_new, cov_new = self._one_step_ecme(self.initial_mean, self.initial_cov, self.h, self.z_exp, self.z_nom, self.sig_eps, n)
+            mean_new, cov_new = self._one_step_ecme(mean_list[-1], cov_list[-1], self.h, self.z_exp, self.z_nom, self.sig_eps, n)
             
             cov_list += [cov_new]
             mean_list += [mean_new]
