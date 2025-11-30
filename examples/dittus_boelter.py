@@ -49,7 +49,7 @@ def dittus_boelter_corr(x):
     return 0.023 * (lambda_f/ D)  * (G * D / mu_f) ** 0.8 * (c_p * mu_f / lambda_f) ** 0.4
 
 def grad_log_db_corr(x):
-    step = 1e-5
+    step = 1e-10
     nabla = np.zeros((x.shape[0], 4))
 
     for i in range(3):
@@ -67,7 +67,7 @@ def grad_log_db_corr(x):
 
     return nabla
 
-def generate_data_becker(data, seed):
+def generate_data_becker(data, std, seed):
     """
     Generate postCHF data according to Becker's experimental dataset 
     """
@@ -75,10 +75,10 @@ def generate_data_becker(data, seed):
 
     n = data.shape[0]
 
-    P = data[:, 0]
-    G = data[:, 1]
-    Tp = data[:, 2]
-    D = data[:, 3]
+    P = data[:, 0] + np.random.normal(0, std[:, 0], size=n)
+    G = data[:, 1] + np.random.normal(0, std[:, 1], size=n)
+    Tp = data[:, 2] + np.random.uniform(-std[:, 2] * np.sqrt(3) , std[:, 2] * np.sqrt(3), size=n)
+    D = data[:, 3] + np.random.uniform(-std[:, 3] * np.sqrt(3) , std[:, 3] * np.sqrt(3), size=n)
 
     Tsat = cp.CoolProp.PropsSI('T', 'P', P, 'Q', 0, 'HEOS::Water') 
     Tf = (Tsat + Tp) / 2
@@ -87,7 +87,7 @@ def generate_data_becker(data, seed):
     mu_f = cp.CoolProp.PropsSI('V', 'T', Tf, 'P', P, 'HEOS::Water') 
     c_p = cp.CoolProp.PropsSI('C', 'T', Tf, 'P', P, 'HEOS::Water')
 
-    gamma_true = np.diag(np.array([0.001, 0.001, 0.01]))
+    gamma_true = np.diag(np.array([0.01, 0.001, 0.01]))
     mu_true = np.array([1, 0.8, 0.4])
 
     theta = np.random.multivariate_normal(mu_true, gamma_true, size=n)
@@ -130,12 +130,20 @@ idx = quantization_fn(m = n)
 X_sp = X[idx, :]
 support_points = pd.DataFrame(X[idx, :])
 
-z_sim = np.log10(generate_data_becker(X_sp, 0)) * (1 + np.random.normal(0, 0.01, 20))
+std_X = np.zeros((n, 4))
+
+std_X[:, 0] = np.repeat(50, n)
+std_X[:, 1] = 0.02 * X_sp[:, 1] 
+std_X[:, 2] = 0.1 * X_sp[:, 2] / np.sqrt(3) 
+std_X[:, 3] = 4e-3 / np.sqrt(3)
+
+sig_eps = np.random.normal(0, 0.01, n) * np.log10(dittus_boelter_corr(X_sp))
+z_sim = np.log10(generate_data_becker(X_sp, std_X, 0)) + sig_eps
 h = np.log10(dittus_boelter_corr(X_sp))
 
 
-#plt.plot(h, z_sim, '*')
-#plt.show()
+# plt.plot(h, z_sim, '*')
+# plt.show()
 
 #sns.pairplot(support_points)
 #plt.show()
@@ -147,9 +155,9 @@ h = np.log10(dittus_boelter_corr(X_sp))
 
 std_X = np.zeros((n, 4))
 
-std_X[:, 0] = np.repeat(50, n)
-std_X[:, 1] = 0.02 * X_sp[:, 1] 
-std_X[:, 2] = 0.1 * X_sp[:, 2] / np.sqrt(3) 
+std_X[:, 0] = np.repeat(20, n)
+std_X[:, 1] = 0.002 * X_sp[:, 1] 
+std_X[:, 2] = 0.002 * X_sp[:, 2] / np.sqrt(3) 
 std_X[:, 3] = 4e-3 / np.sqrt(3)
 
 #std_X = 1e-2 * std_X
@@ -158,7 +166,8 @@ nabla_design = grad_log_db_corr(X_sp)
 
 # + np.log10(dittus_boelter_corr(X)) ** 2 * 0.01 ** 2
 
-std_log_nu = np.sqrt(np.sum(nabla_design ** 2  * std_X ** 2, axis=1) + np.log10(dittus_boelter_corr(X_sp)) ** 2 * 0.01 ** 2) 
+std_log_nu = np.sqrt(np.sum(nabla_design ** 2  * std_X ** 2, axis=1)) 
+#+ np.log10(dittus_boelter_corr(X_sp)) ** 2 * 0.01 ** 2) 
 
 # 2) Monte-Carlo based propagation of uncertainties  
 
@@ -181,7 +190,8 @@ for i in range(n):
     X_MC[:, 2] = m[2] + np.random.uniform(-s[2] * np.sqrt(3) , s[2] * np.sqrt(3), size=N)
     X_MC[:, 3] = 8e-3 + np.random.uniform(-s[3] * np.sqrt(3) , s[3] * np.sqrt(3), size=N)
     
-    z_MC =  np.log10(dittus_boelter_corr(X_MC)) + np.random.normal(0, 0.01 * np.log10(dittus_boelter_corr(X_MC)), size=N)
+    z_MC =  np.log10(dittus_boelter_corr(X_MC)) 
+    #+ np.random.normal(0, 0.01 * np.log10(dittus_boelter_corr(X_MC)), size=N)
 
     q975[i] = np.quantile(z_MC, 0.975)
     q0025[i] = np.quantile(z_MC, 0.025)
@@ -191,17 +201,17 @@ for i in range(n):
 Nu_exp = pd.read_csv("./examples/becker_experiments.csv").values[:, 1]
 Nu_nom = np.log10(dittus_boelter_corr(X_sp)) 
 
-plt.figure(figsize=(14, 8)) 
-plt.errorbar(Nu_nom, h_med, yerr=(h_med - q0025, q975 - h_med), fmt='o', capsize=5, color=bleuEDF, alpha=0.7, label=r"Monte-Carlo")
-plt.errorbar(Nu_nom, Nu_nom, yerr=1.96 * std_log_nu, fmt='o', capsize=5, color=rougeCEA, alpha=0.7, label=r"Variance formula") 
-#plt.plot(Nu_nom, Nu_nom, '+', color=bleuEDF, label=r"$\log_{10}(Nu)^{\rm DB}$")
-#plt.plot(Nu_nom, h_med, '*', color=bleuEDF, alpha=0.7)
-#plt.plot(np.arange(n), Nu_nom - h_med, '*',  color=bleuEDF, alpha=0.7)
-plt.xlabel(r"$\log_{10}(h)$")
-plt.ylabel(r"$g_{\rm DB}(x)$")
-plt.legend()
-plt.tight_layout()
-plt.show()
+# plt.figure(figsize=(14, 8)) 
+# plt.errorbar(Nu_nom, h_med, yerr=(h_med - q0025, q975 - h_med), fmt='o', capsize=5, color=bleuEDF, alpha=0.7, label=r"Monte-Carlo")
+# plt.errorbar(Nu_nom, Nu_nom, yerr=1.96 * std_log_nu, fmt='o', capsize=5, color=rougeCEA, alpha=0.7, label=r"Variance formula") 
+# #plt.plot(Nu_nom, Nu_nom, '+', color=bleuEDF, label=r"$\log_{10}(Nu)^{\rm DB}$")
+# #plt.plot(Nu_nom, h_med, '*', color=bleuEDF, alpha=0.7)
+# #plt.plot(np.arange(n), Nu_nom - h_med, '*',  color=bleuEDF, alpha=0.7)
+# plt.xlabel(r"$\log_{10}(h)$")
+# plt.ylabel(r"$g_{\rm DB}(x)$")
+# plt.legend()
+# plt.tight_layout()
+# plt.show()
 
 # plt.figure(figsize=(14, 8)) 
 # plt.plot(Nu_nom, (q975 - q0025) / (1.96 * std_log_nu), '*')
@@ -212,7 +222,7 @@ plt.show()
 
 N = 500
 
-h = np.zeros((3, N, n))
+h_noise = np.zeros((3, N, n))
 
 for i in range(n): 
 
@@ -226,19 +236,31 @@ for i in range(n):
     X_MC[:, 2] = m[2] + np.random.uniform(-s[2] * np.sqrt(3) , s[2] * np.sqrt(3), size=N)
     X_MC[:, 3] = 8e-3 + np.random.uniform(-s[3] * np.sqrt(3) , s[3] * np.sqrt(3), size=N)
 
-    h[:, :, i] = compute_h(X_MC)
+    h_noise[:, :, i] = compute_h(X_MC)
 
-sig_eps = np.random.normal(0, 0.01, 20) * np.log10(dittus_boelter_corr(X_sp))
-z_sim = np.log10(generate_data_becker(X_sp, 0)) + sig_eps
+sig_eps = np.random.normal(0, 0.01, n) * np.log10(dittus_boelter_corr(X_sp))
+z_sim = np.log10(generate_data_becker(X_sp, std_X, 0)) 
+#+ sig_eps
 
 
-noisy_circe =  pyc.NoisyCirceDiag(initial_mean=[1, 0.8, 0.3], initial_cov=np.identity(3), h=h, z_exp=z_sim, z_nom=np.repeat(np.log10(0.023), n), sig_eps=sig_eps)
+noisy_circe = pyc.NoisyCirceDiag(initial_mean=[1, 1, 1], initial_cov=1e-1 * np.identity(3), h=h_noise, z_exp=z_sim, z_nom=np.repeat(np.log10(0.023), n), sig_eps=sig_eps, niter=10000)
 
-mu, gamma = noisy_circe.estimate()
+h = np.zeros((3, n))
 
-# ecme = pyc.CirceECME(initial_mean=[0.8, 0.3], initial_cov=np.identity(2), h=h, z_exp=Nu_exp, z_nom=Nu_nom, sig_eps=np.repeat(0.1, 15))
+h[:, :] = compute_h(X_sp)
+sig_varf = np.sqrt(np.sum(nabla_design ** 2  * std_X ** 2, axis=1))
 
-# _, _, loglik = ecme.estimate()
+circe_diag = pyc.CirceEMdiag(initial_mean=[1, 1, 1], initial_cov=1e-1 * np.identity(3), h=h, z_exp=z_sim, z_nom=np.repeat(np.log10(0.023), n), sig_eps=sig_varf, niter=10000)
 
-# plt.plot(range(1001), loglik)
-# plt.show()
+mu1, gamma1 = noisy_circe.estimate()
+
+mu2, gamma2, _ = circe_diag.estimate()
+
+print(f"iterations noisy CIRCE = {len(mu1) - 1}")
+print(f"iterations CIRCE EM = {len(mu2) - 1}")
+
+print(f"mu (noisy CIRCE) = {mu1[-1]}")
+print(f"gamma (noisy CIRCE) = {np.diag(gamma1[-1])}")
+
+print(f"mu (CIRCE EM) = {mu2[-1]}")
+print(f"gamma (CIRCE EM) = {np.diag(gamma2[-1])}")

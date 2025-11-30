@@ -68,23 +68,34 @@ class NoisyCirceDiag:
         """
         Compute one iteration of the EM iterative algorithm and returns the updated mean and covariance
         """
+        p = len(mean)
+        N_MC = h.shape[1]
+
         b = []
         S = []
         delta_cov = []
-
+        b_mean = np.zeros((n, N_MC, p))
         for i in range(n):
             h_i = h[:, :, i]
-            N_MC = h_i.shape[1]
 
             b.append(np.mean((cov @ h_i).T * ((z_exp[i] - z_nom[i]) - h_i.T @ mean) / (np.diag(h_i.T @ cov @ h_i) + sig_eps[i] ** 2)[:, np.newaxis], axis=0))
 
-            S.append(cov @ h_i @ ((cov @ h_i).T / (N_MC * np.diag(h_i.T @ cov @ h_i) + sig_eps[i] ** 2)[:, np.newaxis]))
+            #S.append(cov @ h_i @ ((cov @ h_i).T / (N_MC * np.diag(h_i.T @ cov @ h_i) + sig_eps[i] ** 2)[:, np.newaxis]))
+            
+            b_i = (cov @ h_i).T * ((z_exp[i] - z_nom[i]) - h_i.T @ mean) / (np.diag(h_i.T @ cov @ h_i) + sig_eps[i] ** 2)[:, np.newaxis]
+            b_mean[i, :, :] = b_i
 
-            delta_cov.append(b[-1] @ b[-1].T - S[-1])
+            bb_T = np.einsum('ki,kj->kij', b_i, b_i)
+            S_i = np.einsum('ki,kj->kij', (cov @ h_i).T, (cov @ h_i).T / (np.diag(h_i.T @ cov @ h_i) + sig_eps[i] ** 2)[:, np.newaxis])
 
-        delta_mean = np.mean(b, axis=0)
+            delta_cov.append(np.mean(bb_T - S_i, axis=0))
 
-        cov_new = np.diag(np.diag(copy.deepcopy(cov) + np.mean(delta_cov, axis=0) - delta_mean @ delta_mean.T))
+        delta_mean = np.mean(b, axis=0).reshape(-1, 1)
+        b_bar = np.mean(b_mean, axis=0)
+
+        bb_bar_T = np.einsum('ki,kj->kij', b_bar, b_bar)
+
+        cov_new = np.diag(np.diag(copy.deepcopy(cov) + np.mean(delta_cov, axis=0) - np.mean(bb_bar_T, axis=0)))
 
         mean_new = copy.deepcopy(mean) + delta_mean
 
@@ -116,8 +127,9 @@ class NoisyCirceDiag:
         #     mean_new, cov_new = self._one_step_ecme(mean_list[-1], cov_list[-1], self.h, self.z_exp, self.z_nom, self.sig_eps, n)
 
         while (err_cov > self.tolerance or err_mean > self.tolerance) and iterator < self.niter :
+        #while iterator < self.niter :
             
-            mean_new, cov_new = self._one_step_em(self.initial_mean, self.initial_cov, self.h, self.z_exp, self.z_nom, self.sig_eps, n)
+            mean_new, cov_new = self._one_step_em(mean_list[-1], cov_list[-1], self.h, self.z_exp, self.z_nom, self.sig_eps, n)
 
             cov_list += [cov_new]
             mean_list += [mean_new]
