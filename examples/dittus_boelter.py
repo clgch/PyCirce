@@ -87,7 +87,7 @@ def generate_data_becker(data, std, seed):
     mu_f = cp.CoolProp.PropsSI('V', 'T', Tf, 'P', P, 'HEOS::Water') 
     c_p = cp.CoolProp.PropsSI('C', 'T', Tf, 'P', P, 'HEOS::Water')
 
-    gamma_true = np.diag(np.array([0.01, 0.001, 0.01]))
+    gamma_true = np.diag(np.array([0.1, 0.01, 0.01]))
     mu_true = np.array([1, 0.8, 0.4])
 
     theta = np.random.multivariate_normal(mu_true, gamma_true, size=n)
@@ -239,25 +239,27 @@ for i in range(n):
     h_noise[:, :, i] = compute_h(X_MC)
 
 sig_eps = np.random.normal(0, 0.01, n) * np.log10(dittus_boelter_corr(X_sp))
-z_sim = np.log10(generate_data_becker(X_sp, std_X, 0)) 
-#+ sig_eps
+z_sim = np.log10(generate_data_becker(X_sp, std_X, 0)) + sig_eps
 
 
-noisy_circe = pyc.NoisyCirceDiag(initial_mean=[1, 1, 1], initial_cov=1e-1 * np.identity(3), h=h_noise, z_exp=z_sim, z_nom=np.repeat(np.log10(0.023), n), sig_eps=sig_eps, niter=10000)
+noisy_circe = pyc.NoisyCirceDiag(initial_mean=[1, 1, 1], initial_cov=np.identity(3), h=h_noise, z_exp=z_sim, z_nom=np.repeat(np.log10(0.023), n), sig_eps=sig_eps, niter=6000)
 
 h = np.zeros((3, n))
 
 h[:, :] = compute_h(X_sp)
-sig_varf = np.sqrt(np.sum(nabla_design ** 2  * std_X ** 2, axis=1))
+sig_varf = np.sqrt(np.sum(nabla_design ** 2  * std_X ** 2, axis=1)+ sig_eps ** 2)
 
-circe_diag = pyc.CirceEMdiag(initial_mean=[1, 1, 1], initial_cov=1e-1 * np.identity(3), h=h, z_exp=z_sim, z_nom=np.repeat(np.log10(0.023), n), sig_eps=sig_varf, niter=10000)
+circe_diag = pyc.CirceEMdiag(initial_mean=[1, 1, 1], initial_cov=np.identity(3), h=h, z_exp=z_sim, z_nom=np.repeat(np.log10(0.023), n), sig_eps=sig_varf, niter=6000)
 
-mu1, gamma1 = noisy_circe.estimate()
+mu1, gamma1, err_cov1, err_mean1 = noisy_circe.estimate()
 
-mu2, gamma2, _ = circe_diag.estimate()
+mu2, gamma2, loglik, err_cov2, err_mean2 = circe_diag.estimate()
 
-print(f"iterations noisy CIRCE = {len(mu1) - 1}")
-print(f"iterations CIRCE EM = {len(mu2) - 1}")
+print(f"err mean noisy CIRCE = {err_mean1[-1]}")
+print(f"err mean CIRCE EM = {err_mean2[-1]}")
+
+print(f"err cov noisy CIRCE = {err_cov1[-1]}")
+print(f"err cov CIRCE EM = {err_cov2[-1]}")
 
 print(f"mu (noisy CIRCE) = {mu1[-1]}")
 print(f"gamma (noisy CIRCE) = {np.diag(gamma1[-1])}")

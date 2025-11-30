@@ -123,6 +123,9 @@ class NoisyCirceDiag:
         rel_diff = np.abs(mean_list[-1] - mean_list[-2]) / np.abs(mean_list[-1])
         err_mean = np.max(rel_diff)
 
+        err_cov_list = [err_cov]
+        err_mean_list = [err_mean]
+
         # while (err_cov > self.tolerance or err_mean > self.tolerance) and iterator < self.niter :
         #     mean_new, cov_new = self._one_step_ecme(mean_list[-1], cov_list[-1], self.h, self.z_exp, self.z_nom, self.sig_eps, n)
 
@@ -140,12 +143,15 @@ class NoisyCirceDiag:
             rel_diff = np.abs(mean_list[-1] - mean_list[-2]) / np.abs(mean_list[-1])
             err_mean = np.max(rel_diff)
 
+            err_cov_list += [err_cov]
+            err_mean_list += [err_mean]
+
             iterator += 1
             #print(iterator)
             #print(f"err cov = {err_cov}")
             #print(f"err mean = {err_mean}")
         
-        return mean_list, cov_list
+        return mean_list, cov_list, err_cov_list, err_mean_list
 
 
 

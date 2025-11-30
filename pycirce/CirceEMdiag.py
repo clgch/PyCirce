@@ -110,12 +110,14 @@ class CirceEMdiag:
         cov_list = [self.initial_cov]
         mean_list = [self.initial_mean]
 
-        loglik_list = [self._loglik(self.initial_mean, self.initial_cov, self.h, self.z_exp, self.z_nom, self.sig_eps, n)]  
+        loglik_list = [self._loglik(self.initial_mean, self.initial_cov, self.h, self.z_exp, self.z_nom, self.sig_eps, n)[0]]  
 
         mean_new, cov_new = self._one_step_em(self.initial_mean, self.initial_cov, self.h, self.z_exp, self.z_nom, self.sig_eps, n)
 
         cov_list += [cov_new]
         mean_list += [mean_new]
+
+        loglik_list += [self._loglik(mean_list[-1], cov_list[-1], self.h, self.z_exp, self.z_nom, self.sig_eps, n)[0]] 
 
         #err_cov = np.linalg.norm(cov_list[-1] - cov_list[-2])/np.linalg.norm(cov_list[-2])
         #err_mean = np.linalg.norm(mean_list[-1] - mean_list[-2])/np.linalg.norm(mean_list[-2])
@@ -126,12 +128,15 @@ class CirceEMdiag:
         rel_diff = np.abs(mean_list[-1] - mean_list[-2]) / np.abs(mean_list[-1])
         err_mean = np.max(rel_diff)
 
+        err_cov_list = [err_cov]
+        err_mean_list = [err_mean]
+
         # while (err_cov > self.tolerance or err_mean > self.tolerance) and iterator < self.niter :
         #     mean_new, cov_new = self._one_step_ecme(mean_list[-1], cov_list[-1], self.h, self.z_exp, self.z_nom, self.sig_eps, n)
 
         while (err_cov > self.tolerance or err_mean > self.tolerance) and iterator < self.niter :
             
-            loglik_list += [self._loglik(mean_list[-1], cov_list[-1], self.h, self.z_exp, self.z_nom, self.sig_eps, n)] 
+            loglik_list += [self._loglik(mean_list[-1], cov_list[-1], self.h, self.z_exp, self.z_nom, self.sig_eps, n)[0]] 
 
             mean_new, cov_new = self._one_step_em(mean_list[-1], cov_list[-1], self.h, self.z_exp, self.z_nom, self.sig_eps, n)
 
@@ -144,12 +149,15 @@ class CirceEMdiag:
             rel_diff = np.abs(mean_list[-1] - mean_list[-2]) / np.abs(mean_list[-1])
             err_mean = np.max(rel_diff)
 
+            err_cov_list += [err_cov]
+            err_mean_list += [err_mean]
+
             iterator += 1
             #print(iterator)
             #print(f"err cov = {err_cov}")
             #print(f"err mean = {err_mean}")
         
-        return mean_list, cov_list, loglik_list
+        return mean_list, cov_list, loglik_list, err_cov_list, err_mean_list
 
 
 
