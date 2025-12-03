@@ -71,35 +71,30 @@ class NoisyCirceDiag:
         p = len(mean)
         N_MC = h.shape[1]
 
-        b = []
-        S = []
-        delta_cov = []
-        b_mean = np.zeros((n, N_MC, p))
+        # Pre-allocate arrays
+        b = np.zeros((n, p))
+        delta_cov = np.zeros((n, p, p))
+        b_mean = np.zeros((N_MC, n, p))
+
         for i in range(n):
             h_i = h[:, :, i]
-
-            b.append(np.mean((cov @ h_i).T * ((z_exp[i] - z_nom[i]) - h_i.T @ mean) / (np.diag(h_i.T @ cov @ h_i) + sig_eps[i] ** 2)[:, np.newaxis], axis=0))
-
-            #S.append(cov @ h_i @ ((cov @ h_i).T / (N_MC * np.diag(h_i.T @ cov @ h_i) + sig_eps[i] ** 2)[:, np.newaxis]))
-            
-            b_i = (cov @ h_i).T * ((z_exp[i] - z_nom[i]) - h_i.T @ mean) / (np.diag(h_i.T @ cov @ h_i) + sig_eps[i] ** 2)[:, np.newaxis]
-            b_mean[i, :, :] = b_i
-
+            # Compute denominator once
+            denom = np.diag(h_i.T @ cov @ h_i) + sig_eps[i] ** 2
+            # Compute b_i
+            b_i = (cov @ h_i).T * ((z_exp[i] - z_nom[i]) - h_i.T @ mean) / denom[:, np.newaxis]
+            b_mean[:, i, :] = b_i
+            b[i, :] = np.mean(b_i, axis=0)
+            # Compute delta_cov
             bb_T = np.einsum('ki,kj->kij', b_i, b_i)
-            S_i = np.einsum('ki,kj->kij', (cov @ h_i).T, (cov @ h_i).T / (np.diag(h_i.T @ cov @ h_i) + sig_eps[i] ** 2)[:, np.newaxis])
-
-            delta_cov.append(np.mean(bb_T - S_i, axis=0))
+            S_i = np.einsum('ki,kj->kij', (cov @ h_i).T, (cov @ h_i).T / denom[:, np.newaxis])
+            delta_cov[i, :, :] = np.mean(bb_T - S_i, axis=0)
 
         delta_mean = np.mean(b, axis=0).reshape(-1, 1)
         b_bar = np.mean(b_mean, axis=0)
-
         bb_bar_T = np.einsum('ki,kj->kij', b_bar, b_bar)
-
-        cov_new = np.diag(np.diag(copy.deepcopy(cov) + np.mean(delta_cov, axis=0) - np.mean(bb_bar_T, axis=0)))
-
-        mean_new = copy.deepcopy(mean) + delta_mean
-
-        return mean_new.reshape(-1, 1), cov_new
+        cov_new = np.diag(np.diag(cov + np.mean(delta_cov, axis=0) - np.mean(bb_bar_T, axis=0)))
+        mean_new = mean + delta_mean
+        return mean_new, cov_new
 
 
     def estimate(self):
