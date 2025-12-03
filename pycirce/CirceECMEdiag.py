@@ -1,17 +1,18 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Copyright (C) CEA/DES 2025
-
-@author: Clément GAUCHY
+Diagonal-covariance ECME algorithm for probabilistic inversion of
+thermohydraulic correlations (pure Python, vectorised NumPy).
 """
+
 import numpy as np
-import copy
 
 
 class CirceECMEdiag:
     """
-    Expectation Conditional Maximisation Either (ECME) algorithm for probabilistic inversion of thermohydraulic correlation, with diagonal covariance matrix.
+    Expectation Conditional Maximisation Either (ECME) algorithm for
+    probabilistic inversion of thermohydraulic correlation, with
+    diagonal covariance matrix.
     """
 
     def __init__(
@@ -19,9 +20,9 @@ class CirceECMEdiag:
         initial_mean=None,
         initial_cov=None,
         tolerance=None,
-        h=None, 
-        z_exp=None, 
-        z_nom=None, 
+        h=None,
+        z_exp=None,
+        z_nom=None,
         sig_eps=None,
         niter=None,
     ):
@@ -29,162 +30,197 @@ class CirceECMEdiag:
         if z_exp is None:
             raise ValueError("Please provide a vector of experimental values in z_exp")
         if h is None:
-            raise ValueError("Please provide a Jacobian matrix h of size (n_parameters, n_observations) of the thermohydraulic numerical simulator")
+            raise ValueError(
+                "Please provide a Jacobian matrix h of size "
+                "(n_parameters, n_observations) of the thermohydraulic numerical simulator"
+            )
         if z_nom is None:
             raise ValueError("Please provide a vector of nominal simulations in z_nom")
         if sig_eps is None:
-            raise ValueError("Please provide a vector of measurement standard deviations in sig_eps")
+            raise ValueError(
+                "Please provide a vector of measurement standard deviations in sig_eps"
+            )
+
+        # Cast to NumPy arrays
+        h = np.asarray(h, dtype=float)
+        z_exp = np.asarray(z_exp, dtype=float)
+        z_nom = np.asarray(z_nom, dtype=float)
+        sig_eps = np.asarray(sig_eps, dtype=float)
 
         # Check dataset size consistency
-        if not (h.shape[1] == len(z_exp) == len(z_nom)):
-            raise ValueError("ERROR: size inconsistencies between the Jacobian h, the vector z_exp and z_nom !")
+        if not (h.shape[1] == len(z_exp) == len(z_nom) == len(sig_eps)):
+            raise ValueError(
+                "ERROR: size inconsistencies between the Jacobian h, "
+                "the vectors z_exp, z_nom and sig_eps!"
+            )
 
-        # Set default initial mu and cov
+        p = h.shape[0]
+
+        # Initial mean / covariance (full diagonal matrix for public API)
         if initial_mean is None:
-            self.initial_mean = np.ones(size=h.shape[0]).reshape(-1, 1)
-        else: 
-            self.initial_mean = np.array(initial_mean).reshape(-1, 1)
+            self.initial_mean = np.ones(p).reshape(-1, 1)
+        else:
+            self.initial_mean = np.array(initial_mean, dtype=float).reshape(-1, 1)
 
         if initial_cov is None:
-            self.initial_cov = np.diag(np.ones(size=h.shape[0]))
+            self.initial_cov = np.diag(np.ones(p, dtype=float))
         else:
-            self.initial_cov = initial_cov
-        
-        # Set default tolerance 
-        if tolerance is None:
-            self.tolerance = 1e-5
-        else: 
-            self.tolerance = tolerance
-        
-        self.h = h 
+            self.initial_cov = np.array(initial_cov, dtype=float)
+
+        # Tolerance and iteration limit
+        self.tolerance = 1e-5 if tolerance is None else float(tolerance)
+
+        self.h = h
         self.z_exp = z_exp
-        self.z_nom = z_nom 
+        self.z_nom = z_nom
         self.sig_eps = sig_eps
         self.niter = niter
 
+        # Internal diagonal representation
+        self._mean0 = self.initial_mean.reshape(-1).astype(float)
+        self._gamma0 = np.diag(self.initial_cov).astype(float)
 
     @staticmethod
-    def _one_step_ecme(mean, cov, h, z_exp, z_nom, sig_eps, n):
+    def _one_step_ecme_diag(mean, gamma, h, z_exp, z_nom, sig_eps):
         """
-        Compute one iteration of the ECME iterative algorithm and returns the updated mean and covariance
+        One ECME step using only the diagonal of the covariance (gamma).
+
+        Parameters
+        ----------
+        mean  : (p,)
+        gamma : (p,)
+        h     : (p, n)
         """
-        b = []
-        S = []
-        delta_cov = []
-        H_tilde_list = []
+        p, n = h.shape
 
-        for i in range(n):
-            h_i = h[:, i].reshape(-1, 1)
+        # E-step: compute b_i and S_i as in EM, but maintain gamma as diagonal
+        resid = z_exp - z_nom - np.sum(h * mean[:, None], axis=0)  # (n,)
+        denom = sig_eps ** 2 + np.sum(gamma[:, None] * h ** 2, axis=0)  # (n,)
 
-            b.append(cov @ (h_i * ((z_exp[i] - z_nom[i]) - h_i.T @ mean)) / (h_i.T @ cov @ h_i + sig_eps[i] ** 2))
+        g = gamma[:, None] * h  # (p, n)
+        b = g * resid[None, :] / denom[None, :]  # (p, n)
+        S_diag = (g ** 2) / denom[None, :]  # (p, n)
+        delta_cov_diag_mat = b ** 2 - S_diag  # (p, n)
 
-            S.append(cov @ h_i @ h_i.T @ cov / (h_i.T @ cov @ h_i + sig_eps[i] ** 2))
+        delta_cov_diag = np.mean(delta_cov_diag_mat, axis=1)  # (p,)
+        gamma_new = gamma + delta_cov_diag  # ECME: no -delta_mean^2 term
 
-            delta_cov.append(b[-1] @ b[-1].T - S[-1])
-        
-        cov_new = np.diag(np.diag(copy.deepcopy(cov) + np.mean(delta_cov, axis=0)))  
+        # M-step for mean (exact maximisation):
+        # Build H_tilde and its pseudoinverse with diagonal gamma_new
+        # H_tilde = sum_i (h_i h_i^T / (h_i^T cov_new h_i + sig_eps_i^2))
+        # with cov_new diagonal(gamma_new)
+        w = 1.0 / (
+            sig_eps ** 2 + np.sum(gamma_new[:, None] * h ** 2, axis=0)
+        )  # (n,)
 
-        #print(f"cov_new = {cov_new}")
+        # Weighted outer products: sum_i w_i * h_i h_i^T
+        # h has shape (p, n); apply weights along the observation axis
+        H_tilde = (h * w[None, :]) @ h.T  # (p, p)
 
-        for i in range(n):
-            h_i = h[:, i].reshape(-1, 1)
-            H_tilde_list.append(h_i @ h_i.T /(h_i.T @ cov_new @ h_i + sig_eps[i] ** 2))
-        
-        H_tilde = np.sum(H_tilde_list, axis=0)
-        #H_tilde = 0.5 * (H_tilde + H_tilde.T) 
-
-        #L = np.linalg.cholesky(H_tilde)
-        #L_inv = np.linalg.inv(L)
-        #H_tilde_inv = L_inv.T @ L_inv
-
-        ### Computation of the Moore Penrose inverse of H_tilde ###
-
-        # Compute the SVD of H_tilde
+        # Moore–Penrose inverse of H_tilde via SVD
         U, s, Vt = np.linalg.svd(H_tilde, full_matrices=False)
-
-        # Compute the pseudoinverse of the diagonal matrix s
         s_pseudo = np.zeros_like(s)
-
-        non_zero = s > 1e-10  # Threshold for non-zero singular values
-        s_pseudo[non_zero] = 1 / s[non_zero]
-
-        # Compute Moore Penrose inverse
+        non_zero = s > 1e-10
+        s_pseudo[non_zero] = 1.0 / s[non_zero]
         H_plus = Vt.T @ np.diag(s_pseudo) @ U.T
 
-        mean_new = 0
-        for i in range(n):
-            h_i = h[:, i]
-            mean_new += H_plus @ h_i * (z_exp[i] - z_nom[i]) / (h_i.T @ cov_new @ h_i + sig_eps[i] ** 2) 
-            #mean_new += H_tilde_inv @ h_i * (z_exp[i] - z_nom[i])
+        # Right-hand side: sum_i h_i * (z_exp[i] - z_nom[i]) / denom_i
+        rhs = h @ ((z_exp - z_nom) * w)  # (p,)
 
-        #print(f"mean_new = {mean_new}")
-        return mean_new.reshape(-1, 1), cov_new
-     
+        mean_new = H_plus @ rhs  # (p,)
+
+        return mean_new, gamma_new
+
     @staticmethod
-    def _loglik(mean, cov, h, z_exp, z_nom, sig_eps, n):
-        loglik = 0
-
-        for i in range(n):
-            z_prime = z_exp[i] - z_nom[i]
-            h_i = h[:, i]
-
-            loglik -= 0.5 * (z_prime - h_i.T @ mean) ** 2 / (h_i.T @ cov @ h_i + sig_eps[i] ** 2) + 0.5 * np.log(h_i.T @ cov @ h_i + sig_eps[i] ** 2)
-        
+    def _loglik_diag(mean, gamma, h, z_exp, z_nom, sig_eps):
+        """
+        Observed-data log-likelihood with diagonal covariance.
+        """
+        resid = z_exp - z_nom - np.sum(h * mean[:, None], axis=0)  # (n,)
+        denom = sig_eps ** 2 + np.sum(gamma[:, None] * h ** 2, axis=0)  # (n,)
+        loglik = -0.5 * np.sum(resid ** 2 / denom) + 0.5 * np.sum(np.log(denom))
         return loglik
 
-
     def estimate(self):
+        """
+        Run the ECME iterations until convergence (or until niter is reached).
+
+        Returns
+        -------
+        mean_list : list of ndarray
+            Sequence of mean vectors.
+        cov_list : list of ndarray
+            Sequence of (diagonal) covariance matrices.
+        loglik_list : list of float
+            Log-likelihood values at each iteration.
+        err_cov_list : list of float
+            Max relative change of the covariance diagonal at each iteration.
+        err_mean_list : list of float
+            Max relative change of the mean vector at each iteration.
+        """
         n = len(self.z_exp)
-        iterator = 0 
+        iterator = 0
 
-        cov_list = [self.initial_cov]
-        mean_list = [self.initial_mean]
+        mean = self._mean0.copy()
+        gamma = self._gamma0.copy()
 
-        loglik_list = [self._loglik(self.initial_mean, self.initial_cov, self.h, self.z_exp, self.z_nom, self.sig_eps, n)]  
+        cov_list = [np.diag(gamma)]
+        mean_list = [mean.reshape(-1, 1)]
 
-        mean_new, cov_new = self._one_step_ecme(self.initial_mean, self.initial_cov, self.h, self.z_exp, self.z_nom, self.sig_eps, n)
+        loglik_list = [
+            self._loglik_diag(mean, gamma, self.h, self.z_exp, self.z_nom, self.sig_eps)
+        ]
 
-        cov_list += [cov_new]
-        mean_list += [mean_new]
+        mean, gamma = self._one_step_ecme_diag(
+            mean, gamma, self.h, self.z_exp, self.z_nom, self.sig_eps
+        )
 
-        #err_cov = np.linalg.norm(cov_list[-1] - cov_list[-2])/np.linalg.norm(cov_list[-2])
-        #err_mean = np.linalg.norm(mean_list[-1] - mean_list[-2])/np.linalg.norm(mean_list[-2])
+        cov_list.append(np.diag(gamma))
+        mean_list.append(mean.reshape(-1, 1))
+        loglik_list.append(
+            self._loglik_diag(mean, gamma, self.h, self.z_exp, self.z_nom, self.sig_eps)
+        )
 
-        rel_diff = np.abs(np.diag(cov_list[-1]) - np.diag(cov_list[-2])) / np.abs(np.diag(cov_list[-1]))
-        err_cov = np.max(rel_diff)
+        rel_diff_cov = np.abs(cov_list[-1].diagonal() - cov_list[-2].diagonal()) / np.abs(
+            cov_list[-1].diagonal()
+        )
+        err_cov = float(np.max(rel_diff_cov))
 
-        rel_diff = np.abs(mean_list[-1] - mean_list[-2]) / np.abs(mean_list[-1])
-        err_mean = np.max(rel_diff)
+        rel_diff_mean = np.abs(mean_list[-1] - mean_list[-2]) / np.abs(mean_list[-1])
+        err_mean = float(np.max(rel_diff_mean))
 
         err_cov_list = [err_cov]
         err_mean_list = [err_mean]
 
-        # while (err_cov > self.tolerance or err_mean > self.tolerance) and iterator < self.niter :
-        #     mean_new, cov_new = self._one_step_ecme(mean_list[-1], cov_list[-1], self.h, self.z_exp, self.z_nom, self.sig_eps, n)
+        while (err_cov > self.tolerance or err_mean > self.tolerance) and (
+            self.niter is None or iterator < self.niter
+        ):
+            loglik_list.append(
+                self._loglik_diag(
+                    mean, gamma, self.h, self.z_exp, self.z_nom, self.sig_eps
+                )
+            )
 
-        while (err_cov > self.tolerance or err_mean > self.tolerance) and iterator < self.niter :
-            
-            loglik_list += [self._loglik(mean_list[-1], cov_list[-1], self.h, self.z_exp, self.z_nom, self.sig_eps, n)] 
-            
-            mean_new, cov_new = self._one_step_ecme(mean_list[-1], cov_list[-1], self.h, self.z_exp, self.z_nom, self.sig_eps, n)
-            
-            cov_list += [cov_new]
-            mean_list += [mean_new]
+            mean, gamma = self._one_step_ecme_diag(
+                mean, gamma, self.h, self.z_exp, self.z_nom, self.sig_eps
+            )
 
-            rel_diff = np.abs(np.diag(cov_list[-1]) - np.diag(cov_list[-2])) / np.abs(np.diag(cov_list[-1]))
-            err_cov = np.max(rel_diff)
+            cov_list.append(np.diag(gamma))
+            mean_list.append(mean.reshape(-1, 1))
 
-            rel_diff = np.abs(mean_list[-1] - mean_list[-2]) / np.abs(mean_list[-1])
-            err_mean = np.max(rel_diff)
+            rel_diff_cov = np.abs(
+                cov_list[-1].diagonal() - cov_list[-2].diagonal()
+            ) / np.abs(cov_list[-1].diagonal())
+            err_cov = float(np.max(rel_diff_cov))
 
-            err_cov_list += [err_cov]
-            err_mean_list += [err_mean]
+            rel_diff_mean = np.abs(mean_list[-1] - mean_list[-2]) / np.abs(mean_list[-1])
+            err_mean = float(np.max(rel_diff_mean))
+
+            err_cov_list.append(err_cov)
+            err_mean_list.append(err_mean)
 
             iterator += 1
-            #print(iterator)
-            #print(f"err cov = {err_cov}")
-            #print(f"err mean = {err_mean}")
-        
+
         return mean_list, cov_list, loglik_list, err_cov_list, err_mean_list
 
 
