@@ -62,89 +62,95 @@ class NoisyCirceDiag:
         self.sig_eps = sig_eps
         self.niter = niter
 
+        # Internal 1D representations (diagonal covariance as a vector)
+        self._mean0 = self.initial_mean.reshape(-1).astype(float)
+        self._gamma0 = np.diag(self.initial_cov).astype(float)
+
 
     @staticmethod
-    def _one_step_em(mean, cov, h, z_exp, z_nom, sig_eps, n):
+    def _one_step_em_diag(mean, gamma, h, z_exp, z_nom, sig_eps):
         """
         Compute one iteration of the EM iterative algorithm and returns the updated mean and covariance
         """
-        p = len(mean)
-        N_MC = h.shape[1]
 
-        # Pre-allocate arrays
-        b = np.zeros((n, p))
-        delta_cov = np.zeros((n, p, p))
-        b_mean = np.zeros((N_MC, n, p))
+        # Residual for each observation: z_exp - z_nom - h_i^T mean
+        resid = z_exp - z_nom - np.sum(h * mean[:, None, None], axis=0) # (N_MC, n)
+        
+        # Denominators: h_i^T cov h_i + sig_eps^2, with diagonal cov
+        denom = sig_eps ** 2 + np.sum(gamma[:, None, None] * h ** 2, axis=0) # (N_MC, n)
 
-        for i in range(n):
-            h_i = h[:, :, i]
-            # Compute denominator once
-            denom = np.diag(h_i.T @ cov @ h_i) + sig_eps[i] ** 2
-            # Compute b_i
-            b_i = (cov @ h_i).T * ((z_exp[i] - z_nom[i]) - h_i.T @ mean) / denom[:, np.newaxis]
-            b_mean[:, i, :] = b_i
-            b[i, :] = np.mean(b_i, axis=0)
-            # Compute delta_cov
-            bb_T = np.einsum('ki,kj->kij', b_i, b_i)
-            S_i = np.einsum('ki,kj->kij', (cov @ h_i).T, (cov @ h_i).T / denom[:, np.newaxis])
-            delta_cov[i, :, :] = np.mean(bb_T - S_i, axis=0)
+        # g_ji = (cov @ h_i)_j = gamma_j * h_ji
+        g = gamma[:, None, None] * h  # (p, N_MC, n)
 
-        delta_mean = np.mean(b, axis=0).reshape(-1, 1)
-        b_bar = np.mean(b_mean, axis=0)
-        bb_bar_T = np.einsum('ki,kj->kij', b_bar, b_bar)
-        cov_new = np.diag(np.diag(cov + np.mean(delta_cov, axis=0) - np.mean(bb_bar_T, axis=0)))
+        # b_ij and S_ij for diagonal update
+        b_MC = g * resid[None, :] / denom[None, :] # (p, N_MC, n)
+        S_diag = (g ** 2) / denom[None, :]  # (p, N_Mc, n)
+
+        # Empirical mean on both the observations and the Monte-Carlo sample
+        delta_cov_diag_MC = b_MC ** 2 - S_diag
+        delta_cov_diag = np.mean(delta_cov_diag_MC, axis=(-2, -1)) # (p,)
+        delta_mean = np.mean(b_MC, axis=(-2, -1)) # (p,)
+
+        # Empirical mean on the Monte-Carlo sample ONLY
+        delta_mean_sq = np.mean(b_MC, axis=2) ** 2 # (p, n)
+        
+        # Parameters update
+        gamma_new = gamma + delta_cov_diag - np.mean(delta_mean_sq, axis=1)
         mean_new = mean + delta_mean
-        return mean_new, cov_new
+
+        return mean_new, gamma_new
 
 
     def estimate(self):
         n = len(self.z_exp)
-        iterator = 0 
+        iterator = 0
 
-        cov_list = [self.initial_cov]
-        mean_list = [self.initial_mean]
+        mean = self._mean0.copy()
+        gamma = self._gamma0.copy()
 
-        mean_new, cov_new = self._one_step_em(self.initial_mean, self.initial_cov, self.h, self.z_exp, self.z_nom, self.sig_eps, n)
+        cov_list = [np.diag(gamma)]
+        mean_list = [mean.reshape(-1, 1)]
 
-        cov_list += [cov_new]
-        mean_list += [mean_new]
+        mean, gamma = self._one_step_em_diag(
+            mean, gamma, self.h, self.z_exp, self.z_nom, self.sig_eps
+        )
 
-        #err_cov = np.linalg.norm(cov_list[-1] - cov_list[-2])/np.linalg.norm(cov_list[-2])
-        #err_mean = np.linalg.norm(mean_list[-1] - mean_list[-2])/np.linalg.norm(mean_list[-2])
+        cov_list.append(np.diag(gamma))
+        mean_list.append(mean.reshape(-1, 1))
 
-        rel_diff = np.abs(np.diag(cov_list[-1]) - np.diag(cov_list[-2])) / np.abs(np.diag(cov_list[-1]))
-        err_cov = np.max(rel_diff)
+        rel_diff_cov = np.abs(cov_list[-1].diagonal() - cov_list[-2].diagonal()) / np.abs(
+            cov_list[-1].diagonal()
+        )
+        err_cov = float(np.max(rel_diff_cov))
 
-        rel_diff = np.abs(mean_list[-1] - mean_list[-2]) / np.abs(mean_list[-1])
-        err_mean = np.max(rel_diff)
+        rel_diff_mean = np.abs(mean_list[-1] - mean_list[-2]) / np.abs(mean_list[-1])
+        err_mean = float(np.max(rel_diff_mean))
 
         err_cov_list = [err_cov]
         err_mean_list = [err_mean]
 
-        # while (err_cov > self.tolerance or err_mean > self.tolerance) and iterator < self.niter :
-        #     mean_new, cov_new = self._one_step_ecme(mean_list[-1], cov_list[-1], self.h, self.z_exp, self.z_nom, self.sig_eps, n)
-
         while (err_cov > self.tolerance or err_mean > self.tolerance) and iterator < self.niter :
-        #while iterator < self.niter :
             
-            mean_new, cov_new = self._one_step_em(mean_list[-1], cov_list[-1], self.h, self.z_exp, self.z_nom, self.sig_eps, n)
 
-            cov_list += [cov_new]
-            mean_list += [mean_new]
+            mean, gamma = self._one_step_em_diag(
+                mean, gamma, self.h, self.z_exp, self.z_nom, self.sig_eps
+            )
 
-            rel_diff = np.abs(np.diag(cov_list[-1]) - np.diag(cov_list[-2])) / np.abs(np.diag(cov_list[-1]))
-            err_cov = np.max(rel_diff)
+            cov_list.append(np.diag(gamma))
+            mean_list.append(mean.reshape(-1, 1))
 
-            rel_diff = np.abs(mean_list[-1] - mean_list[-2]) / np.abs(mean_list[-1])
-            err_mean = np.max(rel_diff)
+            rel_diff_cov = np.abs(
+                cov_list[-1].diagonal() - cov_list[-2].diagonal()
+            ) / np.abs(cov_list[-1].diagonal())
+            err_cov = float(np.max(rel_diff_cov))
 
-            err_cov_list += [err_cov]
-            err_mean_list += [err_mean]
+            rel_diff_mean = np.abs(mean_list[-1] - mean_list[-2]) / np.abs(mean_list[-1])
+            err_mean = float(np.max(rel_diff_mean))
+
+            err_cov_list.append(err_cov)
+            err_mean_list.append(err_mean)
 
             iterator += 1
-            #print(iterator)
-            #print(f"err cov = {err_cov}")
-            #print(f"err mean = {err_mean}")
         
         return mean_list, cov_list, err_cov_list, err_mean_list
 
