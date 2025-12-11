@@ -46,7 +46,9 @@ def main():
     mu_em = pd.read_csv(os.path.join(results_dir, "mu_em_nrep_200.csv")).values
     gamma_em = pd.read_csv(os.path.join(results_dir, "gamma_em_nrep_200.csv")).values
     mu_ecme = pd.read_csv(os.path.join(results_dir, "mu_ecme_nrep_200.csv")).values
-    gamma_ecme = pd.read_csv(os.path.join(results_dir, "gamma_ecme_nrep_200.csv")).values
+    gamma_ecme = pd.read_csv(
+        os.path.join(results_dir, "gamma_ecme_nrep_200.csv")
+    ).values
 
     # Drop the first row (it contains the true values, see blasius.py)
     mu_em_est = mu_em[1:, :]
@@ -108,8 +110,5 @@ def main():
     plt.show()
 
 
-
 if __name__ == "__main__":
     main()
-
-
