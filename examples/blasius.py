@@ -62,7 +62,7 @@ def compute_h(x):
 
 np.random.seed(0)
 
-n = 100
+n = 20
 
 T = np.array([25, 110, 250])
 P = np.array([60, 90, 110, 130])
@@ -103,6 +103,7 @@ data[:, 3] = data[:, 3] + np.random.uniform(
 h = np.zeros((2, n))
 
 h[:, :] = compute_h(data)
+print(np.linalg.eigvals(h @ h.T))
 
 # plt.hist(h[1, :], density=True)
 # plt.show()
@@ -126,6 +127,9 @@ gamma_em = np.zeros((n_rep + 1, 2))
 mu_ecme = np.zeros((n_rep + 1, 2))
 gamma_ecme = np.zeros((n_rep + 1, 2))
 
+mu_reml = np.zeros((n_rep + 1, 2))
+gamma_reml = np.zeros((n_rep + 1, 2))
+
 gamma_true = np.diag(np.array([0.1, 0.1]))
 mu_true = np.array([np.log10(0.316), -0.25])
 
@@ -134,6 +138,9 @@ gamma_em[0, :] = np.diag(gamma_true)
 
 mu_ecme[0, :] = mu_true
 gamma_ecme[0, :] = np.diag(gamma_true)
+
+mu_reml[0, :] = mu_true
+gamma_reml[0, :] = np.diag(gamma_true)
 
 for it in range(1, n_rep + 1):
     print(f"it = {it}")
@@ -161,8 +168,19 @@ for it in range(1, n_rep + 1):
         tolerance=1e-4,
     )
 
+    reml = pyc.CirceREML(
+        initial_mean=[np.log10(0.316), -0.25],
+        initial_cov=1e-1 * np.identity(2),
+        h=h,
+        z_exp=f_blasius_exp,
+        z_nom=np.repeat(0, n),
+        sig_eps=sig_eps,
+        niter=15000
+    )
+
     mu1, gamma1, loglik, err_cov1, err_mean1 = circe_diag_ecme.estimate()
     mu2, gamma2, loglik2, err_cov2, err_mean2 = circe_diag.estimate()
+    mu3, gamma3, _ = reml.estimate(n_starts=1)
 
     mu_em[it, :] = np.array(mu2[-1])[:, 0]
     gamma_em[it, :] = np.diag(gamma2[-1])
@@ -170,10 +188,15 @@ for it in range(1, n_rep + 1):
     mu_ecme[it, :] = np.array(mu1[-1])[:, 0]
     gamma_ecme[it, :] = np.diag(gamma1[-1])
 
+    mu_reml[it, :] = mu3
+    gamma_reml[it, :] = gamma3
+
 pd.DataFrame(mu_em).to_csv(f"./results/mu_em_nrep_{n_rep}.csv", index=False)
 pd.DataFrame(gamma_em).to_csv(f"./results/gamma_em_nrep_{n_rep}.csv", index=False)
 pd.DataFrame(mu_ecme).to_csv(f"./results/mu_ecme_nrep_{n_rep}.csv", index=False)
 pd.DataFrame(gamma_ecme).to_csv(f"./results/gamma_ecme_nrep_{n_rep}.csv", index=False)
+pd.DataFrame(mu_reml).to_csv(f"./results/mu_reml_nrep_{n_rep}.csv", index=False)
+pd.DataFrame(gamma_reml).to_csv(f"./results/gamma_reml_nrep_{n_rep}.csv", index=False)
 
 # start2 = time.time()
 # mu2, gamma2, loglik2, err_cov2, err_mean2 = circe_diag.estimate()
