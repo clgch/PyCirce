@@ -12,6 +12,7 @@ rc("lines", linewidth=3)
 
 rougeCEA = "#b81420"
 bleuEDF = "#10367a"
+vertREML = "#008000"
 
 
 def relative_rmse(est: np.ndarray, true: np.ndarray) -> np.ndarray:
@@ -49,35 +50,41 @@ def main():
     gamma_ecme = pd.read_csv(
         os.path.join(results_dir, "gamma_ecme_nrep_200.csv")
     ).values
+    mu_reml = pd.read_csv(os.path.join(results_dir, "mu_reml_nrep_200.csv")).values
+    gamma_reml = pd.read_csv(os.path.join(results_dir, "gamma_reml_nrep_200.csv")).values
 
     # Drop the first row (it contains the true values, see blasius.py)
     mu_em_est = mu_em[1:, :]
     gamma_em_est = gamma_em[1:, :]
     mu_ecme_est = mu_ecme[1:, :]
     gamma_ecme_est = gamma_ecme[1:, :]
+    mu_reml_est = mu_reml[1:, :]
+    gamma_reml_est = gamma_reml[1:, :]
 
     # Relative RMSE for each replication
     rrmse_mu_em = relative_rmse(mu_em_est, mu_true)
     rrmse_mu_ecme = relative_rmse(mu_ecme_est, mu_true)
     rrmse_gamma_em = relative_rmse(gamma_em_est, gamma_true_diag)
     rrmse_gamma_ecme = relative_rmse(gamma_ecme_est, gamma_true_diag)
+    rrmse_mu_reml = relative_rmse(mu_reml_est, mu_true)
+    rrmse_gamma_reml = relative_rmse(gamma_reml_est, gamma_true_diag)
 
     # One figure with box plots comparing EM vs ECME
     fig, axes = plt.subplots(2, 1, figsize=(8, 10), sharex=True)
     # Positions for the two methods on x-axis
-    positions = [1, 2]
-    labels = ["EM", "ECME"]
+    positions = [1, 2, 3]
+    labels = ["EM", "ECME", "REML"]
 
     # Mean (mu) relative RMSE
     ax = axes[0]
     boxplot_data = ax.boxplot(
-        [rrmse_mu_em, rrmse_mu_ecme],
+        [rrmse_mu_em, rrmse_mu_ecme, rrmse_mu_reml],
         positions=positions,
         widths=0.6,
         patch_artist=True,
         showmeans=True,
     )
-    for box, color in zip(boxplot_data["boxes"], [bleuEDF, rougeCEA]):
+    for box, color in zip(boxplot_data["boxes"], [bleuEDF, rougeCEA, vertREML]):
         box.set_facecolor(color)
         box.set_alpha(0.6)
     ax.set_ylabel(r"Relative MAE on $\mu$")
@@ -89,13 +96,13 @@ def main():
     # Gamma (variance) relative RMSE
     ax = axes[1]
     boxplot_data = ax.boxplot(
-        [rrmse_gamma_em, rrmse_gamma_ecme],
+        [rrmse_gamma_em, rrmse_gamma_ecme, rrmse_gamma_reml],
         positions=positions,
         widths=0.6,
         patch_artist=True,
         showmeans=True,
     )
-    for box, color in zip(boxplot_data["boxes"], [bleuEDF, rougeCEA]):
+    for box, color in zip(boxplot_data["boxes"], [bleuEDF, rougeCEA, vertREML]):
         box.set_facecolor(color)
         box.set_alpha(0.6)
     ax.set_ylabel(r"Relative MAE on $\gamma$")
