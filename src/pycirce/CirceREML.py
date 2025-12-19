@@ -81,7 +81,7 @@ class CirceREML:
 
 
     @staticmethod
-    def restricted_nloglik_diag(gamma, h, z_exp, z_nom, sig_eps):
+    def restricted_nloglik_diag(gamma, h, y, sig_eps):
         """
         Negative restricted log-likelihood with diagonal covariance of the latent variable (gamma).
         """
@@ -109,27 +109,20 @@ class CirceREML:
         s_pseudo[non_zero] = 1.0 / s[non_zero]
         H_plus = Vt.T @ np.diag(s_pseudo) @ U.T
 
-        # RHS = H^T V^-1 (z_exp - z_nom) = sum_i w_i h_i (z_exp_i - z_nom_i)
-        y = z_exp - z_nom
-        rhs = h @ (y * w)  # (p,)
-        
-        mean_gls = H_plus @ rhs  # (p,)
-
-        # 3. Compute residuals with optimal mean
-        resid = y - h.T @ mean_gls  # (n,)
+        P = np.diag(w) - (h * w[None, :]).T @ H_plus @ (h * w[None, :])
 
         # 4. Compute NLL terms
         # Term 1: log|V| = sum log(denom)
         log_det_V = np.sum(np.log(denom))
 
         # Term 2: r^T V^-1 r = sum resid_i^2 / denom_i
-        quad_form = np.sum((resid**2) * w)
+        quad_form = y.dot(P @ y.T)
 
         # Term 3: log|H^T V^-1 H| = log|H_tilde|
         # Use pseudo-determinant (product of non-zero singular values)
         log_det_H_tilde = np.sum(np.log(s[non_zero]))
 
-        nll = 0.5 * (log_det_V + quad_form + log_det_H_tilde)
+        nll = log_det_V + quad_form + log_det_H_tilde
         return nll
 
     def estimate(self, n_starts=5):
@@ -160,11 +153,12 @@ class CirceREML:
         # We use a small epsilon to avoid division by zero if sig_eps is 0
         p = self.h.shape[0]
         bounds = [(1e-10, None) for _ in range(p)]
+        y = self.z_exp - self.z_nom
 
         # Objective function wrapper
         def objective(gamma_current):
             return self.restricted_nloglik_diag(
-                gamma_current, self.h, self.z_exp, self.z_nom, self.sig_eps
+                gamma_current, self.h, y, self.sig_eps
             )
 
         best_fun = np.inf
