@@ -187,6 +187,7 @@ class CirceECME:
             self.z_nom,
             self.sig_eps,
             n,
+            self.alpha
         )
 
         cov_list += [cov_new]
@@ -227,6 +228,7 @@ class CirceECME:
                 self.z_nom,
                 self.sig_eps,
                 n,
+                self.alpha
             )
 
             cov_list += [cov_new]
