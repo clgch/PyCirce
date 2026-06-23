@@ -10,7 +10,7 @@ import numpy as np
 import copy
 
 
-class CirceECME:
+class CirceECMERidge:
     """
     Expectation Conditional Maximisation Either (ECME) algorithm for probabilistic inversion of thermohydraulic correlation.
     """
@@ -101,9 +101,9 @@ class CirceECME:
         S_tilde = copy.deepcopy(cov) + np.mean(delta_cov, axis=0)
 
         eigvals, Q = np.linalg.eigh(S_tilde)
-        S_ridge = Q @ np.diag(np.sqrt(alpha + eigvals**2/4)) @ Q.T
+        S_ridge = Q @ np.diag(np.sqrt(alpha + 0.25 * eigvals**2)) @ Q.T
 
-        cov_new = 1/2 * S_tilde + S_ridge
+        cov_new = 0.5 * S_tilde + S_ridge
 
         # print(f"cov_new = {cov_new}")
 
