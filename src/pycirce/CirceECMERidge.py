@@ -49,12 +49,12 @@ class CirceECMERidge:
 
         # Set default initial mu and cov
         if initial_mean is None:
-            self.initial_mean = np.ones(size=h.shape[0]).reshape(-1, 1)
+            self.initial_mean = np.ones(h.shape[0]).reshape(-1, 1)
         else:
             self.initial_mean = np.array(initial_mean).reshape(-1, 1)
 
         if initial_cov is None:
-            self.initial_cov = np.diag(np.ones(size=h.shape[0]))
+            self.initial_cov = np.diag(np.ones(h.shape[0]))
         else:
             self.initial_cov = initial_cov
 
@@ -73,6 +73,7 @@ class CirceECMERidge:
         self.z_nom = z_nom
         self.sig_eps = sig_eps
         self.niter = niter
+        self.alpha = alpha
 
     @staticmethod
     def _one_step_ecme(mean, cov, h, z_exp, z_nom, sig_eps, n, alpha):
@@ -159,6 +160,7 @@ class CirceECMERidge:
             ) + 0.5 * np.log(h_i.T @ cov @ h_i + sig_eps[i] ** 2)
 
         return loglik
+    
 
     def estimate(self):
         n = len(self.z_exp)
@@ -245,4 +247,6 @@ class CirceECMERidge:
             # print(f"err cov = {err_cov}")
             # print(f"err mean = {err_mean}")
 
-        return mean_list, cov_list, loglik_list
+        bic = len(self.initial_mean) * np.log(n) - loglik_list[-1]
+
+        return mean_list, cov_list, loglik_list, err_cov, err_mean, bic
