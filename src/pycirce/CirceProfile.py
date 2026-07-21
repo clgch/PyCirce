@@ -8,9 +8,9 @@ thermohydraulic correlations (pure Python, vectorised NumPy).
 import numpy as np
 
 
-class CirceREML:
+class CirceProfile:
     """
-    Restricted maximum likelihood algorithm for probabilistic inversion of
+    Profiled maximum likelihood algorithm for probabilistic inversion of
     thermohydraulic correlation, with diagonal covariance matrix.
     """
 
@@ -23,7 +23,7 @@ class CirceREML:
         z_exp=None,
         z_nom=None,
         sig_eps=None,
-        niter=None,
+        niter=None
     ):
         # Missing parameters
         if z_exp is None:
@@ -81,47 +81,43 @@ class CirceREML:
 
 
     @staticmethod
-    def restricted_nloglik_diag(gamma, h, y, sig_eps):
+    def profile_nloglik_diag(gamma, h, y, sig_eps):
         """
-        Negative restricted log-likelihood with diagonal covariance of the latent variable (gamma).
+        Negative profile log-likelihood with diagonal covariance of the latent variable (gamma).
         """
+        # CIRCE model writes z = X m + H^T \Lambda + eps 
+        # 
+        #
+
         p, n = h.shape
 
-        # Residual with mean=0 (initial approx for w calculation)
-        # However, REML NLL formula is: 0.5 * log|V| + 0.5 * r^T V^-1 r + 0.5 * log|X^T V^-1 X| - const
-        # where r = z_exp - z_nom - H * beta_hat
-        # beta_hat = (H^T V^-1 H)^-1 H^T V^-1 (z_exp - z_nom)
-        # V = diag(sig_eps^2 + sum(gamma * h^2))
-
-        # 1. Compute diagonal of V
+        # 1. Compute diagonal of V = (H^T \Gamma H + \Sigma_eps)
         # Gamma must be positive, enforced by bounds in estimate()
         denom = sig_eps**2 + np.sum(gamma[:, None] * h**2, axis=0)  # (n,) diagonal of V
         w = 1.0 / denom  # (n,) diagonal of V^-1
 
-        # H_tilde = H^T V^-1 H = sum_i w_i h_i h_i^T
+        # 2. Compute V^-1 using Moore-Penrose inverse and H_tilde = H^T V^-1 H
         H_tilde = (h * w[None, :]) @ h.T  # (p, p)
 
-        # Moore–Penrose inverse of H_tilde via SVD for stability
         U, s, Vt = np.linalg.svd(H_tilde)
         s_pseudo = np.zeros_like(s)
         non_zero = s > 1e-10
         s_pseudo[non_zero] = 1.0 / s[non_zero]
         H_plus = Vt.T @ np.diag(s_pseudo) @ U.T
 
-        P = np.diag(w) - (h * w[None, :]).T @ H_plus @ (h * w[None, :])
+        # 3 Compute the GLS estimate of m
+        m_hat = H_plus @ (h @ (w * y))
 
         # 4. Compute NLL terms
-        # Term 1: log|V| = sum log(denom)
+        # 4.1 log det of V
         log_det_V = np.sum(np.log(denom))
 
-        # Term 2: r^T V^-1 r = sum resid_i^2 / denom_i
-        quad_form = y.dot(P @ y.T)
+        # 4.2 quadratic form
+        y_centered = y - h.T @ m_hat
+        quad_form = np.sum(w * y_centered**2)
+         
+        nll = log_det_V + quad_form
 
-        # Term 3: log|H^T V^-1 H| = log|H_tilde|
-        # Use pseudo-determinant (product of non-zero singular values)
-        log_det_H_tilde = np.sum(np.log(s[non_zero]))
-
-        nll = log_det_V + quad_form + log_det_H_tilde
         return nll
 
     def estimate(self, n_starts=5):
@@ -156,7 +152,7 @@ class CirceREML:
 
         # Objective function wrapper
         def objective(gamma_current):
-            return self.restricted_nloglik_diag(
+            return self.profile_nloglik_diag(
                 gamma_current, self.h, y, self.sig_eps
             )
 
