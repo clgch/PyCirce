@@ -124,7 +124,7 @@ def compute_h(x):
 # plt.plot(f_blasius, f_blasius_exp, '*')
 # plt.show()
 
-n_rep = 200
+n_rep = 500
 
 mu_em = np.zeros((n_rep + 1, 2))
 gamma_em = np.zeros((n_rep + 1, 2))
@@ -158,26 +158,27 @@ log_alpha_range = np.linspace(-3, 0, num=50)
 
 bic_array = np.zeros(len(log_alpha_range))
 
+n = 100
+
+T = np.array([25, 110, 250])
+P = np.array([60, 90, 110, 130])
+
+data = np.zeros((n, 4))
+
+data[:, 0] = P[np.random.choice(4, size=n, replace=True)] * 100000
+data[:, 1] = np.random.uniform(250, 3000, size=n)
+
+data[:, 2] = np.random.uniform(20, 40, size=n) * (
+    data[:, 0] < 110 * 100000
+) + np.random.uniform(20, 300, size=n) * (data[:, 0] > 100 * 100000)
+data[:, 2] = data[:, 2] + 273.15
+
+data[:, 3] = np.repeat(4e-3, n)
+
 for it in range(1, n_rep + 1):
     print(f"it = {it}")
 
     np.random.seed(it)
-    n = 100
-
-    T = np.array([25, 110, 250])
-    P = np.array([60, 90, 110, 130])
-
-    data = np.zeros((n, 4))
-
-    data[:, 0] = P[np.random.choice(4, size=n, replace=True)] * 100000
-    data[:, 1] = np.random.uniform(250, 3000, size=n)
-
-    data[:, 2] = np.random.uniform(20, 40, size=n) * (
-        data[:, 0] < 110 * 100000
-    ) + np.random.uniform(20, 300, size=n) * (data[:, 0] > 100 * 100000)
-    data[:, 2] = data[:, 2] + 273.15
-
-    data[:, 3] = np.repeat(4e-3, n)
 
     sig_eps = np.random.normal(0, 1, n) 
 

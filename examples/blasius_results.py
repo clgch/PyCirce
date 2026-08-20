@@ -42,7 +42,7 @@ def main():
     # True parameters (must match those in blasius.py)
     gamma_true = np.diag(np.array([(0.1)**2, 0.7]))
     mu_true = np.array([np.log10(0.316) * 1.3, -0.25 * 1.3])
-    gamma_true_diag = np.log10(np.diag(gamma_true))
+    gamma_true_diag = np.diag(gamma_true)
 
     # Load results (filenames are those written in blasius.py)
     mu_em = pd.read_csv(os.path.join(results_dir, "mu_em_nrep_200.csv")).values
