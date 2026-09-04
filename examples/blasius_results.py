@@ -45,16 +45,16 @@ def main():
     gamma_true_diag = np.diag(gamma_true)
 
     # Load results (filenames are those written in blasius.py)
-    mu_em = pd.read_csv(os.path.join(results_dir, "mu_em_nrep_200.csv")).values
-    gamma_em = pd.read_csv(os.path.join(results_dir, "gamma_em_nrep_200.csv")).values
-    mu_ecme = pd.read_csv(os.path.join(results_dir, "mu_ecme_nrep_200.csv")).values
+    mu_em = pd.read_csv(os.path.join(results_dir, "mu_EM_nrep_500_n_10.csv")).values
+    gamma_em = pd.read_csv(os.path.join(results_dir, "gamma_EM_nrep_500_n_10.csv")).values
+    mu_ecme = pd.read_csv(os.path.join(results_dir, "mu_ECME_nrep_500_n_10.csv")).values
     gamma_ecme = pd.read_csv(
-        os.path.join(results_dir, "gamma_ecme_nrep_200.csv")
+        os.path.join(results_dir, "gamma_ECME_nrep_500_n_10.csv")
     ).values
-    mu_reml = pd.read_csv(os.path.join(results_dir, "mu_reml_nrep_200.csv")).values
-    gamma_reml = pd.read_csv(os.path.join(results_dir, "gamma_reml_nrep_200.csv")).values
-    mu_profile = pd.read_csv(os.path.join(results_dir, "mu_profile_nrep_200.csv")).values
-    gamma_profile = pd.read_csv(os.path.join(results_dir, "gamma_profile_nrep_200.csv")).values
+    mu_reml = pd.read_csv(os.path.join(results_dir, "mu_REML_nrep_500_n_10.csv")).values
+    gamma_reml = pd.read_csv(os.path.join(results_dir, "gamma_REML_nrep_500_n_10.csv")).values
+    mu_profile = pd.read_csv(os.path.join(results_dir, "mu_profile_nrep_500_n_10.csv")).values
+    gamma_profile = pd.read_csv(os.path.join(results_dir, "gamma_profile_nrep_500_n_10.csv")).values
     #mu_ecme_ridge = pd.read_csv(os.path.join(results_dir, "mu_ecme_ridge_nrep_200.csv")).values
     #gamma_ecme_ridge = pd.read_csv(os.path.join(results_dir, "gamma_ecme_ridge_nrep_200.csv")).values
 
@@ -97,7 +97,7 @@ def main():
         patch_artist=True,
         #showmeans=True,
     )
-    for box, color in zip(boxplot_data["boxes"], [bleuEDF, rougeCEA, vertREML, 'cyan']):
+    for box, color in zip(boxplot_data["boxes"], [bleuEDF, rougeCEA, vertREML, orangeEDF]):
         box.set_facecolor(color)
         box.set_alpha(1)
     ax.set_ylabel(r"Relative MAE on $\mu$")
@@ -115,7 +115,7 @@ def main():
         patch_artist=True,
         #showmeans=True,
     )
-    for box, color in zip(boxplot_data["boxes"], [bleuEDF, rougeCEA, vertREML, 'cyan']):
+    for box, color in zip(boxplot_data["boxes"], [bleuEDF, rougeCEA, vertREML, orangeEDF]):
         box.set_facecolor(color)
         box.set_alpha(1)
     ax.set_ylabel(r"Relative MAE on $\gamma$")
@@ -128,6 +128,48 @@ def main():
     out_path = os.path.join(results_dir, "blasius_relative_rmse_boxplots.png")
     plt.savefig(out_path, dpi=300)
     plt.show()
+
+    # Ratio between estimated and true variance for each replication,
+    # one separate figure per gamma component, each with one boxplot per method
+    ratio_gamma_em = gamma_em_est / gamma_true_diag[None, :]
+    ratio_gamma_ecme = gamma_ecme_est / gamma_true_diag[None, :]
+    ratio_gamma_reml = gamma_reml_est / gamma_true_diag[None, :]
+    ratio_gamma_profile = gamma_profile_est / gamma_true_diag[None, :]
+
+    n_components = gamma_true_diag.shape[0]
+    method_colors = [bleuEDF, rougeCEA, vertREML, orangeEDF]
+
+    for k in range(n_components):
+        fig, ax = plt.subplots(figsize=(8, 8))
+        boxplot_data = ax.boxplot(
+            [
+                ratio_gamma_em[ratio_gamma_em[:, k] > 1e-7, k] ,
+                ratio_gamma_ecme[ratio_gamma_ecme[:, k] > 1e-7, k],
+                ratio_gamma_reml[ratio_gamma_reml[:, k] > 1e-7, k],
+                ratio_gamma_profile[ratio_gamma_profile[:, k] > 1e-7, k],
+            ],
+            positions=positions,
+            widths=0.6,
+            patch_artist=True,
+        )
+        for box, color in zip(boxplot_data["boxes"], method_colors):
+            box.set_facecolor(color)
+            box.set_alpha(1)
+
+        ax.axhline(1.0, color="black", linestyle="--", linewidth=1.5)
+        ax.set_yscale("log")
+        ax.set_ylabel(r"Estimated / true variance ratio")
+        ax.set_title(rf"$\hat{{\gamma}}_{{{k + 1}}} / \gamma_{{{k + 1}}}$")
+        ax.set_xticks(positions)
+        ax.set_xticklabels(labels)
+        ax.grid(True, axis="y", alpha=1)
+
+        plt.tight_layout()
+        out_path = os.path.join(
+            results_dir, f"blasius_variance_ratio_boxplot_gamma{k + 1}.png"
+        )
+        plt.savefig(out_path, dpi=300)
+        plt.show()
 
 
 if __name__ == "__main__":

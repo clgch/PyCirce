@@ -2,6 +2,7 @@ import numpy as np
 import pandas as pd
 import pycirce as pyc
 import CoolProp as cp
+import scipy.stats as st
 import matplotlib.pyplot as plt
 from matplotlib import rc
 
@@ -158,7 +159,7 @@ log_alpha_range = np.linspace(-3, 0, num=50)
 
 bic_array = np.zeros(len(log_alpha_range))
 
-n = 100
+n = 10
 
 T = np.array([25, 110, 250])
 P = np.array([60, 90, 110, 130])
@@ -186,8 +187,11 @@ for it in range(1, n_rep + 1):
 
     h = np.zeros((2, n))
     h[:, :] = compute_h(data)
+
+    print(np.mean(h[1, :]) ** 2 / np.var(h[1, :]))
+
     bmin = 1/3.0 * np.amax((1) ** 2/(h[0, :] ** 2 + h[1, :] ** 2))
-    print(bmin)
+    #print(bmin)
 
 
     circe_diag = pyc.CirceEMdiag(
@@ -256,15 +260,71 @@ for it in range(1, n_rep + 1):
     mu_profile[it, :] = mu4
     gamma_profile[it, :] = gamma4
 
+    # Coverage computation using the linear Gaussian model
+    cov_rate = np.linspace(0.1, 1, 10)
 
-pd.DataFrame(mu_em).to_csv(f"./results/mu_em_nrep_{n_rep}.csv", index=False)
-pd.DataFrame(gamma_em).to_csv(f"./results/gamma_em_nrep_{n_rep}.csv", index=False)
-pd.DataFrame(mu_ecme).to_csv(f"./results/mu_ecme_nrep_{n_rep}.csv", index=False)
-pd.DataFrame(gamma_ecme).to_csv(f"./results/gamma_ecme_nrep_{n_rep}.csv", index=False)
-pd.DataFrame(mu_reml).to_csv(f"./results/mu_reml_nrep_{n_rep}.csv", index=False)
-pd.DataFrame(gamma_reml).to_csv(f"./results/gamma_reml_nrep_{n_rep}.csv", index=False)
-pd.DataFrame(mu_profile).to_csv(f"./results/mu_profile_nrep_{n_rep}.csv", index=False)
-pd.DataFrame(gamma_profile).to_csv(f"./results/gamma_profile_nrep_{n_rep}.csv", index=False)
+    coverage_EM = np.zeros((len(cov_rate), 2))
+    coverage_ECME = np.zeros((len(cov_rate), 2))
+    coverage_REML = np.zeros((len(cov_rate), 2))
+    coverage_profile = np.zeros((len(cov_rate), 2))
+
+    interq_EM = np.zeros((len(cov_rate), 2))
+    interq_ECME = np.zeros((len(cov_rate), 2))
+    interq_REML = np.zeros((len(cov_rate), 2))
+    interq_profile = np.zeros((len(cov_rate), 2))
+
+    it_cov = 0
+    for alpha in cov_rate:
+
+        q_min = st.norm().ppf(alpha/2)
+        q_max = st.norm().ppf(1 - alpha/2)
+        
+        coverage_EM[it_cov, 1] = np.mean((f_blasius_exp > np.sum(h * mu_em[it, :][:, None], axis=0) + (np.sqrt(np.sum(gamma_em[it, :][:, None] * h ** 2, axis=0) + 1)) * q_min) & (f_blasius_exp < np.sum(h * mu_em[it, :][:, None], axis=0) + (np.sqrt(np.sum(gamma_em[it, :][:, None] * h ** 2, axis=0) + 1)) * q_max))
+        coverage_EM[it_cov, 0] = 1 - alpha
+
+        interq_EM[it_cov, 1] = np.median(np.sqrt(np.sum(gamma_em[it, :][:, None] * h ** 2, axis=0) + 1)) * (q_max - q_min)
+        interq_EM[it_cov, 0] = 1 - alpha
+
+        coverage_ECME[it_cov, 1] = np.mean((f_blasius_exp > np.sum(h * mu_ecme[it, :][:, None], axis=0) + (np.sqrt(np.sum(gamma_ecme[it, :][:, None] * h ** 2, axis=0) + 1)) * q_min) & (f_blasius_exp < np.sum(h * mu_ecme[it, :][:, None], axis=0) + (np.sqrt(np.sum(gamma_ecme[it, :][:, None] * h ** 2, axis=0) + 1)) * q_max))
+        coverage_ECME[it_cov, 0] = 1 - alpha
+
+        interq_ECME[it_cov, 1] = np.median(np.sqrt(np.sum(gamma_ecme[it, :][:, None] * h ** 2, axis=0) + 1)) * (q_max - q_min) 
+        interq_ECME[it_cov, 0] = 1 - alpha
+
+        coverage_REML[it_cov, 1] = np.mean((f_blasius_exp > np.sum(h * mu_reml[it, :][:, None], axis=0) + (np.sqrt(np.sum(gamma_reml[it, :][:, None] * h ** 2, axis=0) + 1)) * q_min) & (f_blasius_exp < np.sum(h * mu_reml[it, :][:, None], axis=0) + (np.sqrt(np.sum(gamma_reml[it, :][:, None] * h ** 2, axis=0) + 1)) * q_max))
+        coverage_REML[it_cov, 0] = 1 - alpha
+
+        interq_REML[it_cov, 1] = np.median(np.sqrt(np.sum(gamma_reml[it, :][:, None] * h ** 2, axis=0) + 1)) * (q_max - q_min) 
+        interq_REML[it_cov, 0] = 1 - alpha
+
+        coverage_profile[it_cov, 1] = np.mean((f_blasius_exp > np.sum(h * mu_profile[it, :][:, None], axis=0) + (np.sqrt(np.sum(gamma_profile[it, :][:, None] * h ** 2, axis=0) + 1)) * q_min) & (f_blasius_exp < np.sum(h * mu_profile[it, :][:, None], axis=0) + (np.sqrt(np.sum(gamma_profile[it, :][:, None] * h ** 2, axis=0) + 1)) * q_max))
+        coverage_profile[it_cov, 0] = 1 - alpha
+
+        interq_profile[it_cov, 1] = np.median(np.sqrt(np.sum(gamma_profile[it, :][:, None] * h ** 2, axis=0) + 1)) * (q_max - q_min) 
+        interq_profile[it_cov, 0] = 1 - alpha
+
+        it_cov += 1
+
+
+pd.DataFrame(mu_em).to_csv(f"./results/mu_EM_nrep_{n_rep}_n_{n}.csv", index=False)
+pd.DataFrame(gamma_em).to_csv(f"./results/gamma_EM_nrep_{n_rep}_n_{n}.csv", index=False)
+pd.DataFrame(coverage_EM).to_csv(f"./results/coverage_EM_nrep_{n_rep}_n_{n}.csv", index=False)
+pd.DataFrame(interq_EM).to_csv(f"./results/interq_EM_nrep_{n_rep}_n_{n}.csv", index=False)
+
+pd.DataFrame(mu_ecme).to_csv(f"./results/mu_ECME_nrep_{n_rep}_n_{n}.csv", index=False)
+pd.DataFrame(gamma_ecme).to_csv(f"./results/gamma_ECME_nrep_{n_rep}_n_{n}.csv", index=False)
+pd.DataFrame(coverage_ECME).to_csv(f"./results/coverage_ECME_nrep_{n_rep}_n_{n}.csv", index=False)
+pd.DataFrame(interq_ECME).to_csv(f"./results/interq_ECME_nrep_{n_rep}_n_{n}.csv", index=False)
+
+pd.DataFrame(mu_reml).to_csv(f"./results/mu_REML_nrep_{n_rep}_n_{n}.csv", index=False)
+pd.DataFrame(gamma_reml).to_csv(f"./results/gamma_REML_nrep_{n_rep}_n_{n}.csv", index=False)
+pd.DataFrame(coverage_REML).to_csv(f"./results/coverage_REML_nrep_{n_rep}_n_{n}.csv", index=False)
+pd.DataFrame(interq_REML).to_csv(f"./results/interq_REML_nrep_{n_rep}_n_{n}.csv", index=False)
+
+pd.DataFrame(mu_profile).to_csv(f"./results/mu_profile_nrep_{n_rep}_n_{n}.csv", index=False)
+pd.DataFrame(gamma_profile).to_csv(f"./results/gamma_profile_nrep_{n_rep}_n_{n}.csv", index=False)
+pd.DataFrame(coverage_profile).to_csv(f"./results/coverage_profile_nrep_{n_rep}_n_{n}.csv", index=False)
+pd.DataFrame(interq_profile).to_csv(f"./results/interq_profile_nrep_{n_rep}_n_{n}.csv", index=False)
 
 
 # sig_eps = np.random.normal(0, 4, n) 
