@@ -16,6 +16,28 @@ vertREML = "#008000"
 orangeEDF = "#fe5716"
 
 
+def batched_mean_ratio(est: np.ndarray, true: np.ndarray, batch_size: int) -> np.ndarray:
+    """
+    Split replications into consecutive batches of `batch_size`, average the
+    estimated variance within each batch, and return the ratio of that
+    batched mean to the true variance.
+
+    est   : shape (n_rep, p)
+    true  : shape (p,)
+
+    Returns
+    -------
+    ratio : shape (n_rep // batch_size, p)
+    """
+    n_rep = est.shape[0]
+    n_batches = n_rep // batch_size
+    # Invalid (near-zero/negative) estimates are excluded from the batch average.
+    est_valid = np.where(est > 1e-7, est, np.nan)
+    batched = est_valid[: n_batches * batch_size].reshape(n_batches, batch_size, -1)
+    batch_mean = np.nanmean(batched, axis=1)
+    return batch_mean / true[None, :]
+
+
 def relative_rmse(est: np.ndarray, true: np.ndarray) -> np.ndarray:
     """
     Compute relative RMSE between each row of `est` and the true vector,
@@ -45,16 +67,16 @@ def main():
     gamma_true_diag = np.diag(gamma_true)
 
     # Load results (filenames are those written in blasius.py)
-    mu_em = pd.read_csv(os.path.join(results_dir, "mu_EM_nrep_500_n_10.csv")).values
-    gamma_em = pd.read_csv(os.path.join(results_dir, "gamma_EM_nrep_500_n_10.csv")).values
-    mu_ecme = pd.read_csv(os.path.join(results_dir, "mu_ECME_nrep_500_n_10.csv")).values
+    mu_em = pd.read_csv(os.path.join(results_dir, "mu_EM_nrep_1000_n_10.csv")).values
+    gamma_em = pd.read_csv(os.path.join(results_dir, "gamma_EM_nrep_1000_n_10.csv")).values
+    mu_ecme = pd.read_csv(os.path.join(results_dir, "mu_ECME_nrep_1000_n_10.csv")).values
     gamma_ecme = pd.read_csv(
-        os.path.join(results_dir, "gamma_ECME_nrep_500_n_10.csv")
+        os.path.join(results_dir, "gamma_ECME_nrep_1000_n_10.csv")
     ).values
-    mu_reml = pd.read_csv(os.path.join(results_dir, "mu_REML_nrep_500_n_10.csv")).values
-    gamma_reml = pd.read_csv(os.path.join(results_dir, "gamma_REML_nrep_500_n_10.csv")).values
-    mu_profile = pd.read_csv(os.path.join(results_dir, "mu_profile_nrep_500_n_10.csv")).values
-    gamma_profile = pd.read_csv(os.path.join(results_dir, "gamma_profile_nrep_500_n_10.csv")).values
+    mu_reml = pd.read_csv(os.path.join(results_dir, "mu_REML_nrep_1000_n_10.csv")).values
+    gamma_reml = pd.read_csv(os.path.join(results_dir, "gamma_REML_nrep_1000_n_10.csv")).values
+    mu_profile = pd.read_csv(os.path.join(results_dir, "mu_profile_nrep_1000_n_10.csv")).values
+    gamma_profile = pd.read_csv(os.path.join(results_dir, "gamma_profile_nrep_1000_n_10.csv")).values
     #mu_ecme_ridge = pd.read_csv(os.path.join(results_dir, "mu_ecme_ridge_nrep_200.csv")).values
     #gamma_ecme_ridge = pd.read_csv(os.path.join(results_dir, "gamma_ecme_ridge_nrep_200.csv")).values
 
@@ -167,6 +189,47 @@ def main():
         plt.tight_layout()
         out_path = os.path.join(
             results_dir, f"blasius_variance_ratio_boxplot_gamma{k + 1}.png"
+        )
+        plt.savefig(out_path, dpi=300)
+        plt.show()
+
+    # Ratio between batched mean estimated variance and true variance,
+    # one separate figure per gamma component, each with one boxplot per method
+    batch_size = 10
+    ratio_batched_gamma_em = batched_mean_ratio(gamma_em_est, gamma_true_diag, batch_size)
+    ratio_batched_gamma_ecme = batched_mean_ratio(gamma_ecme_est, gamma_true_diag, batch_size)
+    ratio_batched_gamma_reml = batched_mean_ratio(gamma_reml_est, gamma_true_diag, batch_size)
+    ratio_batched_gamma_profile = batched_mean_ratio(
+        gamma_profile_est, gamma_true_diag, batch_size
+    )
+
+    for k in range(n_components):
+        fig, ax = plt.subplots(figsize=(8, 8))
+        boxplot_data = ax.boxplot(
+            [
+                ratio_batched_gamma_em[:, k],
+                ratio_batched_gamma_ecme[:, k],
+                ratio_batched_gamma_reml[:, k],
+                ratio_batched_gamma_profile[:, k],
+            ],
+            positions=positions,
+            widths=0.6,
+            patch_artist=True,
+        )
+        for box, color in zip(boxplot_data["boxes"], method_colors):
+            box.set_facecolor(color)
+            box.set_alpha(1)
+
+        ax.axhline(1.0, color="black", linestyle="--", linewidth=1.5)
+        ax.set_ylabel(rf"Batched mean ($n={batch_size}$) estimated / true variance ratio")
+        ax.set_title(rf"$\overline{{\hat{{\gamma}}}}_{{{k + 1}}} / \gamma_{{{k + 1}}}$")
+        ax.set_xticks(positions)
+        ax.set_xticklabels(labels)
+        ax.grid(True, axis="y", alpha=1)
+
+        plt.tight_layout()
+        out_path = os.path.join(
+            results_dir, f"blasius_batched_variance_ratio_boxplot_gamma{k + 1}.png"
         )
         plt.savefig(out_path, dpi=300)
         plt.show()
