@@ -59,24 +59,27 @@ def relative_rmse(est: np.ndarray, true: np.ndarray) -> np.ndarray:
 def main():
     # Project root is the parent directory of this 'examples' folder
     project_root = os.path.dirname(os.path.dirname(__file__))
-    results_dir = os.path.join(project_root, "results")
+    results_dir = os.path.join(project_root, "results_10092026")
+
+    n = 5
 
     # True parameters (must match those in blasius.py)
-    gamma_true = np.diag(np.array([(0.1)**2, 0.7]))
+    #gamma_true = np.diag(np.array([(0.1)**2, 0.7]))
+    gamma_true = np.diag(np.array([0.5, 0.7]))
     mu_true = np.array([np.log10(0.316) * 1.3, -0.25 * 1.3])
     gamma_true_diag = np.diag(gamma_true)
 
     # Load results (filenames are those written in blasius.py)
-    mu_em = pd.read_csv(os.path.join(results_dir, "mu_EM_nrep_1000_n_10.csv")).values
-    gamma_em = pd.read_csv(os.path.join(results_dir, "gamma_EM_nrep_1000_n_10.csv")).values
-    mu_ecme = pd.read_csv(os.path.join(results_dir, "mu_ECME_nrep_1000_n_10.csv")).values
+    mu_em = pd.read_csv(os.path.join(results_dir, f"mu_EM_nrep_1000_n_{n}.csv")).values
+    gamma_em = pd.read_csv(os.path.join(results_dir, f"gamma_EM_nrep_1000_n_{n}.csv")).values
+    mu_ecme = pd.read_csv(os.path.join(results_dir, f"mu_ECME_nrep_1000_n_{n}.csv")).values
     gamma_ecme = pd.read_csv(
-        os.path.join(results_dir, "gamma_ECME_nrep_1000_n_10.csv")
+        os.path.join(results_dir, f"gamma_ECME_nrep_1000_n_{n}.csv")
     ).values
-    mu_reml = pd.read_csv(os.path.join(results_dir, "mu_REML_nrep_1000_n_10.csv")).values
-    gamma_reml = pd.read_csv(os.path.join(results_dir, "gamma_REML_nrep_1000_n_10.csv")).values
-    mu_profile = pd.read_csv(os.path.join(results_dir, "mu_profile_nrep_1000_n_10.csv")).values
-    gamma_profile = pd.read_csv(os.path.join(results_dir, "gamma_profile_nrep_1000_n_10.csv")).values
+    mu_reml = pd.read_csv(os.path.join(results_dir, f"mu_REML_nrep_1000_n_{n}.csv")).values
+    gamma_reml = pd.read_csv(os.path.join(results_dir, f"gamma_REML_nrep_1000_n_{n}.csv")).values
+    mu_profile = pd.read_csv(os.path.join(results_dir, f"mu_profile_nrep_1000_n_{n}.csv")).values
+    gamma_profile = pd.read_csv(os.path.join(results_dir, f"gamma_profile_nrep_1000_n_{n}.csv")).values
     #mu_ecme_ridge = pd.read_csv(os.path.join(results_dir, "mu_ecme_ridge_nrep_200.csv")).values
     #gamma_ecme_ridge = pd.read_csv(os.path.join(results_dir, "gamma_ecme_ridge_nrep_200.csv")).values
 
@@ -193,6 +196,46 @@ def main():
         plt.savefig(out_path, dpi=300)
         plt.show()
 
+    # Ratio between estimated and true mean for each replication,
+    # one separate figure per mu component, each with one boxplot per method
+    ratio_mu_em = mu_em_est / mu_true[None, :]
+    ratio_mu_ecme = mu_ecme_est / mu_true[None, :]
+    ratio_mu_reml = mu_reml_est / mu_true[None, :]
+    ratio_mu_profile = mu_profile_est / mu_true[None, :]
+
+    n_mu_components = mu_true.shape[0]
+
+    for k in range(n_mu_components):
+        fig, ax = plt.subplots(figsize=(8, 8))
+        boxplot_data = ax.boxplot(
+            [
+                ratio_mu_em[:, k],
+                ratio_mu_ecme[:, k],
+                ratio_mu_reml[:, k],
+                ratio_mu_profile[:, k],
+            ],
+            positions=positions,
+            widths=0.6,
+            patch_artist=True,
+        )
+        for box, color in zip(boxplot_data["boxes"], method_colors):
+            box.set_facecolor(color)
+            box.set_alpha(1)
+
+        ax.axhline(1.0, color="black", linestyle="--", linewidth=1.5)
+        ax.set_ylabel(r"Estimated / true mean ratio")
+        ax.set_title(rf"$\hat{{\mu}}_{{{k + 1}}} / \mu_{{{k + 1}}}$")
+        ax.set_xticks(positions)
+        ax.set_xticklabels(labels)
+        ax.grid(True, axis="y", alpha=1)
+
+        plt.tight_layout()
+        out_path = os.path.join(
+            results_dir, f"blasius_mean_ratio_boxplot_mu{k + 1}.png"
+        )
+        plt.savefig(out_path, dpi=300)
+        plt.show()
+
     # Ratio between batched mean estimated variance and true variance,
     # one separate figure per gamma component, each with one boxplot per method
     batch_size = 10
@@ -221,7 +264,7 @@ def main():
             box.set_alpha(1)
 
         ax.axhline(1.0, color="black", linestyle="--", linewidth=1.5)
-        ax.set_ylabel(rf"Batched mean ($n={batch_size}$) estimated / true variance ratio")
+        ax.set_ylabel(rf"Batched mean ($b={batch_size}$) estimated / true variance ratio")
         ax.set_title(rf"$\overline{{\hat{{\gamma}}}}_{{{k + 1}}} / \gamma_{{{k + 1}}}$")
         ax.set_xticks(positions)
         ax.set_xticklabels(labels)
@@ -233,6 +276,7 @@ def main():
         )
         plt.savefig(out_path, dpi=300)
         plt.show()
+
 
 
 if __name__ == "__main__":
