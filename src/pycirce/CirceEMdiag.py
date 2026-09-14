@@ -125,89 +125,119 @@ class CirceEMdiag:
         loglik = -0.5 * np.sum(resid**2 / denom) + 0.5 * np.sum(np.log(denom))
         return np.array([loglik])
 
-    def estimate(self):
+    def _run_single_em(self, init_mu, init_gamma):
         """
-        Run the EM iterations until convergence (or until niter is reached).
+        Run one EM trajectory to convergence from a given starting point.
 
         Returns
         -------
-        mean_list : list of ndarray
-            Sequence of mean vectors.
-        cov_list : list of ndarray
-            Sequence of (diagonal) covariance matrices.
-        loglik_list : list of float
-            Log-likelihood values at each iteration.
-        err_cov_list : list of float
-            Max relative change of the covariance diagonal at each iteration.
-        err_mean_list : list of float
-            Max relative change of the mean vector at each iteration.
+        mean_list, cov_list, loglik_list : list
+            Trajectories, all of equal length (one entry per iterate,
+            including the initial point).
+        iterator : int
+            Number of EM steps taken after the initial point.
         """
-        iterator = 0
+        eps = 1e-12
 
-        mean = self._mean0.copy()
-        gamma = self._gamma0.copy()
-
-        cov_list = [np.diag(gamma)]
-        mean_list = [mean.reshape(-1, 1)]
-
+        cov_list = [np.diag(init_gamma)]
+        mean_list = [init_mu.reshape(-1, 1)]
         loglik_list = [
             self._loglik_diag(
-                mean, gamma, self.h, self.z_exp, self.z_nom, self.sig_eps
+                init_mu, init_gamma, self.h, self.z_exp, self.z_nom, self.sig_eps
             )[0]
         ]
 
-        mean, gamma = self._one_step_em_diag(
-            mean, gamma, self.h, self.z_exp, self.z_nom, self.sig_eps
-        )
-
-        cov_list.append(np.diag(gamma))
-        mean_list.append(mean.reshape(-1, 1))
-        loglik_list.append(
-            self._loglik_diag(
-                mean, gamma, self.h, self.z_exp, self.z_nom, self.sig_eps
-            )[0]
-        )
-
-        rel_diff_cov = np.abs(
-            cov_list[-1].diagonal() - cov_list[-2].diagonal()
-        ) / np.abs(cov_list[-1].diagonal())
-        err_cov = float(np.max(rel_diff_cov))
-
-        rel_diff_mean = np.abs(mean_list[-1] - mean_list[-2]) / np.abs(mean_list[-1])
-        err_mean = float(np.max(rel_diff_mean))
-
-        err_cov_list = [err_cov]
-        err_mean_list = [err_mean]
+        mean, gamma = init_mu, init_gamma
+        iterator = 0
+        err_cov = np.inf
+        err_mean = np.inf
 
         while (err_cov > self.tolerance or err_mean > self.tolerance) and (
             self.niter is None or iterator < self.niter
         ):
-            loglik_list.append(
-                self._loglik_diag(
-                    mean, gamma, self.h, self.z_exp, self.z_nom, self.sig_eps
-                )[0]
-            )
-
-            mean, gamma = self._one_step_em_diag(
+            mean_new, gamma_new = self._one_step_em_diag(
                 mean, gamma, self.h, self.z_exp, self.z_nom, self.sig_eps
             )
 
-            cov_list.append(np.diag(gamma))
-            mean_list.append(mean.reshape(-1, 1))
+            cov_list.append(np.diag(gamma_new))
+            mean_list.append(mean_new.reshape(-1, 1))
+            loglik_list.append(
+                self._loglik_diag(
+                    mean_new, gamma_new, self.h, self.z_exp, self.z_nom, self.sig_eps
+                )[0]
+            )
 
-            rel_diff_cov = np.abs(
-                cov_list[-1].diagonal() - cov_list[-2].diagonal()
-            ) / np.abs(cov_list[-1].diagonal())
+            rel_diff_cov = np.abs(gamma_new - gamma) / np.maximum(np.abs(gamma_new), eps)
             err_cov = float(np.max(rel_diff_cov))
 
-            rel_diff_mean = np.abs(mean_list[-1] - mean_list[-2]) / np.abs(
-                mean_list[-1]
-            )
+            rel_diff_mean = np.abs(mean_new - mean) / np.maximum(np.abs(mean_new), eps)
             err_mean = float(np.max(rel_diff_mean))
 
-            err_cov_list.append(err_cov)
-            err_mean_list.append(err_mean)
-
+            mean, gamma = mean_new, gamma_new
             iterator += 1
 
-        return mean_list, cov_list, loglik_list, err_cov_list, err_mean_list
+        return mean_list, cov_list, loglik_list, iterator
+
+    def estimate(self, n_starts=10, random_state=None):
+        """
+        Run the EM iterations until convergence (or until niter is reached),
+        restarting from multiple initial points and keeping the run with the
+        highest final log-likelihood.
+
+        Parameters
+        ----------
+        n_starts : int
+            Number of starting points. The first start always uses the
+            (initial_mean, initial_cov) provided at construction; the
+            remaining starts are drawn at random around it.
+        random_state : int or numpy.random.Generator, optional
+            Seed or generator used for the random restarts, for reproducibility.
+
+        Returns
+        -------
+        mean_list : list of ndarray
+            Sequence of mean vectors for the best run.
+        cov_list : list of ndarray
+            Sequence of (diagonal) covariance matrices for the best run.
+        loglik_list : list of float
+            Log-likelihood values at each iteration for the best run
+            (same length as mean_list/cov_list).
+        iterator : int
+            Number of EM steps taken for the best run.
+        """
+        p = self.h.shape[0]
+        rng = random_state if isinstance(random_state, np.random.Generator) else np.random.default_rng(random_state)
+
+        best_fun = -np.inf
+        best_res = None
+
+        for i in range(n_starts):
+            if i == 0:
+                init_mu = self._mean0.copy()
+                init_gamma = self._gamma0.copy()
+            else:
+                scale = np.mean(self._gamma0) if np.sum(self._gamma0) > 1e-9 else 1.0
+                init_gamma = rng.uniform(0.1 * scale, 10 * scale, size=p)
+                init_mu = rng.multivariate_normal(self._mean0, np.diag(init_gamma))
+
+            mean_list, cov_list, loglik_list, iterator = self._run_single_em(
+                init_mu, init_gamma
+            )
+
+            final_loglik = loglik_list[-1]
+            if not np.isfinite(final_loglik):
+                continue
+
+            if final_loglik > best_fun:
+                best_fun = final_loglik
+                best_res = (mean_list, cov_list, loglik_list, iterator)
+        
+        if best_res is None:
+            raise RuntimeError(
+                "EM failed to converge to a finite log-likelihood from any of the "
+                f"{n_starts} starting points."
+            )
+
+        mean_list, cov_list, loglik_list, iterator = best_res
+
+        return mean_list, cov_list, loglik_list, iterator

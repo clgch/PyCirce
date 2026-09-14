@@ -139,7 +139,60 @@ class CirceECMEdiag:
         loglik = -0.5 * np.sum(resid**2 / denom) + 0.5 * np.sum(np.log(denom))
         return loglik
 
-    def estimate(self):
+    def _run_single_ecme(self, init_mu, init_gamma):
+            """
+            Run one ECME trajectory to convergence from a given starting point.
+    
+            Returns
+            -------
+            mean_list, cov_list, loglik_list : list
+                Trajectories, all of equal length (one entry per iterate,
+                including the initial point).
+            iterator : int
+                Number of EM steps taken after the initial point.
+            """
+            eps = 1e-12
+    
+            cov_list = [np.diag(init_gamma)]
+            mean_list = [init_mu.reshape(-1, 1)]
+            loglik_list = [
+                self._loglik_diag(
+                    init_mu, init_gamma, self.h, self.z_exp, self.z_nom, self.sig_eps
+                )
+            ]
+    
+            mean, gamma = init_mu, init_gamma
+            iterator = 0
+            err_cov = np.inf
+            err_mean = np.inf
+    
+            while (err_cov > self.tolerance or err_mean > self.tolerance) and (
+                self.niter is None or iterator < self.niter
+            ):
+                mean_new, gamma_new = self._one_step_ecme_diag(
+                    mean, gamma, self.h, self.z_exp, self.z_nom, self.sig_eps
+                )
+    
+                cov_list.append(np.diag(gamma_new))
+                mean_list.append(mean_new.reshape(-1, 1))
+                loglik_list.append(
+                    self._loglik_diag(
+                        mean_new, gamma_new, self.h, self.z_exp, self.z_nom, self.sig_eps
+                    )
+                )
+    
+                rel_diff_cov = np.abs(gamma_new - gamma) / np.maximum(np.abs(gamma_new), eps)
+                err_cov = float(np.max(rel_diff_cov))
+    
+                rel_diff_mean = np.abs(mean_new - mean) / np.maximum(np.abs(mean_new), eps)
+                err_mean = float(np.max(rel_diff_mean))
+    
+                mean, gamma = mean_new, gamma_new
+                iterator += 1
+    
+            return mean_list, cov_list, loglik_list, iterator
+    
+    def estimate(self, n_starts=10, random_state=None):
         """
         Run the ECME iterations until convergence (or until niter is reached).
 
@@ -156,68 +209,38 @@ class CirceECMEdiag:
         err_mean_list : list of float
             Max relative change of the mean vector at each iteration.
         """
-        iterator = 0
+        p = self.h.shape[0]
+        rng = random_state if isinstance(random_state, np.random.Generator) else np.random.default_rng(random_state)
 
-        mean = self._mean0.copy()
-        gamma = self._gamma0.copy()
+        best_fun = -np.inf
+        best_res = None
 
-        cov_list = [np.diag(gamma)]
-        mean_list = [mean.reshape(-1, 1)]
+        for i in range(n_starts):
+            if i == 0:
+                init_mu = self._mean0.copy()
+                init_gamma = self._gamma0.copy()
+            else:
+                scale = np.mean(self._gamma0) if np.sum(self._gamma0) > 1e-9 else 1.0
+                init_gamma = rng.uniform(0.1 * scale, 10 * scale, size=p)
+                init_mu = rng.multivariate_normal(self._mean0, np.diag(init_gamma))
 
-        loglik_list = [
-            self._loglik_diag(mean, gamma, self.h, self.z_exp, self.z_nom, self.sig_eps)
-        ]
-
-        mean, gamma = self._one_step_ecme_diag(
-            mean, gamma, self.h, self.z_exp, self.z_nom, self.sig_eps
-        )
-
-        cov_list.append(np.diag(gamma))
-        mean_list.append(mean.reshape(-1, 1))
-        loglik_list.append(
-            self._loglik_diag(mean, gamma, self.h, self.z_exp, self.z_nom, self.sig_eps)
-        )
-
-        rel_diff_cov = np.abs(
-            cov_list[-1].diagonal() - cov_list[-2].diagonal()
-        ) / np.abs(cov_list[-1].diagonal())
-        err_cov = float(np.max(rel_diff_cov))
-
-        rel_diff_mean = np.abs(mean_list[-1] - mean_list[-2]) / np.abs(mean_list[-1])
-        err_mean = float(np.max(rel_diff_mean))
-
-        err_cov_list = [err_cov]
-        err_mean_list = [err_mean]
-
-        while (err_cov > self.tolerance or err_mean > self.tolerance) and (
-            self.niter is None or iterator < self.niter
-        ):
-            loglik_list.append(
-                self._loglik_diag(
-                    mean, gamma, self.h, self.z_exp, self.z_nom, self.sig_eps
-                )
+            mean_list, cov_list, loglik_list, iterator = self._run_single_ecme(
+                init_mu, init_gamma
             )
 
-            mean, gamma = self._one_step_ecme_diag(
-                mean, gamma, self.h, self.z_exp, self.z_nom, self.sig_eps
+            final_loglik = loglik_list[-1]
+            if not np.isfinite(final_loglik):
+                continue
+
+            if final_loglik > best_fun:
+                best_fun = final_loglik
+                best_res = (mean_list, cov_list, loglik_list, iterator)
+        if best_res is None:
+            raise RuntimeError(
+                "ECME failed to converge to a finite log-likelihood from any of the "
+                f"{n_starts} starting points."
             )
 
-            cov_list.append(np.diag(gamma))
-            mean_list.append(mean.reshape(-1, 1))
+        mean_list, cov_list, loglik_list, iterator = best_res
 
-            rel_diff_cov = np.abs(
-                cov_list[-1].diagonal() - cov_list[-2].diagonal()
-            ) / np.abs(cov_list[-1].diagonal())
-            err_cov = float(np.max(rel_diff_cov))
-
-            rel_diff_mean = np.abs(mean_list[-1] - mean_list[-2]) / np.abs(
-                mean_list[-1]
-            )
-            err_mean = float(np.max(rel_diff_mean))
-
-            err_cov_list.append(err_cov)
-            err_mean_list.append(err_mean)
-
-            iterator += 1
-
-        return mean_list, cov_list, loglik_list, err_cov_list, err_mean_list
+        return mean_list, cov_list, loglik_list, iterator

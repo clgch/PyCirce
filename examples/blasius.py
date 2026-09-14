@@ -140,7 +140,7 @@ gamma_reml = np.zeros((n_rep + 1, 2))
 mu_profile = np.zeros((n_rep + 1, 2))
 gamma_profile = np.zeros((n_rep + 1, 2))
 
-gamma_true = np.diag(np.array([(0.1)**2, 0.7]))
+gamma_true = np.diag(np.array([0.5, 0.7]))
 mu_true = np.array([np.log10(0.316) * 1.3, -0.25 * 1.3])
 
 mu_em[0, :] = mu_true
@@ -160,7 +160,7 @@ log_alpha_range = np.linspace(-3, 0, num=50)
 
 bic_array = np.zeros(len(log_alpha_range))
 
-n = 10
+n = 5
 
 T = np.array([25, 110, 250])
 P = np.array([60, 90, 110, 130])
@@ -176,6 +176,9 @@ data[:, 2] = np.random.uniform(20, 40, size=n) * (
 data[:, 2] = data[:, 2] + 273.15
 
 data[:, 3] = np.repeat(4e-3, n)
+#exponents = np.random.uniform(-3, 2, size=n)
+#data[:, 3] = np.power(10, exponents)
+
 
 # Coverage computation using the linear Gaussian model
 cov_rate = np.linspace(0.1, 1, 10)
@@ -198,6 +201,18 @@ def run_replication(it):
 
     h = np.zeros((2, n))
     h[:, :] = compute_h(data)
+
+    # denom = sig_eps**2 + np.sum(np.diag(gamma_true)[:, None] * h**2, axis=0)
+    # w = 1.0 / denom
+    # H_tilde = (h * w[None, :]) @ h.T
+            
+    # U, s, Vt = np.linalg.svd(H_tilde)
+    # s_pseudo = np.zeros_like(s)
+    # non_zero = s > 1e-10
+    # s_pseudo[non_zero] = 1.0 / s[non_zero]
+    # H_plus = Vt.T @ np.diag(s_pseudo) @ U.T
+
+    # print(H_plus)
 
     #print(np.mean(h[1, :]) ** 2 / np.var(h[1, :]))
 
@@ -248,10 +263,10 @@ def run_replication(it):
     )
 
 
-    mu1, gamma1, loglik, err_cov1, err_mean1 = circe_diag_ecme.estimate()
+    mu1, gamma1, _, _ = circe_diag_ecme.estimate(n_starts=1)
     #print(f"iterations ECME = {len(err_mean1)}/15000")
 
-    mu2, gamma2, loglik2, err_cov2, err_mean2 = circe_diag.estimate()
+    mu2, gamma2, _, _ = circe_diag.estimate(n_starts=1)
     #print(f"iterations EM = {len(err_mean2)}/15000")
 
     mu3, gamma3, _ = circe_reml.estimate(n_starts=10)
@@ -333,7 +348,7 @@ def run_replication(it):
 
 
 if __name__ == "__main__":
-    with ProcessPoolExecutor(max_workers=8) as executor:
+    with ProcessPoolExecutor(max_workers=1) as executor:
         results = list(executor.map(run_replication, range(1, n_rep + 1)))
 
     # coverage_EM_stack = np.zeros((n_rep, len(cov_rate)))
@@ -383,25 +398,25 @@ if __name__ == "__main__":
     # interq_REML = np.column_stack((1 - cov_rate, interq_REML_stack.mean(axis=0)))
     # interq_profile = np.column_stack((1 - cov_rate, interq_profile_stack.mean(axis=0)))
 
-    pd.DataFrame(mu_em).to_csv(f"./results/mu_EM_nrep_{n_rep}_n_{n}.csv", index=False)
-    pd.DataFrame(gamma_em).to_csv(f"./results/gamma_EM_nrep_{n_rep}_n_{n}.csv", index=False)
-    #pd.DataFrame(coverage_EM).to_csv(f"./results/coverage_EM_nrep_{n_rep}_n_{n}.csv", index=False)
-    #pd.DataFrame(interq_EM).to_csv(f"./results/interq_EM_nrep_{n_rep}_n_{n}.csv", index=False)
+    # pd.DataFrame(mu_em).to_csv(f"./results_10092026/mu_EM_nrep_{n_rep}_n_{n}.csv", index=False)
+    # pd.DataFrame(gamma_em).to_csv(f"./results_10092026/gamma_EM_nrep_{n_rep}_n_{n}.csv", index=False)
+    # #pd.DataFrame(coverage_EM).to_csv(f"./results/coverage_EM_nrep_{n_rep}_n_{n}.csv", index=False)
+    # #pd.DataFrame(interq_EM).to_csv(f"./results/interq_EM_nrep_{n_rep}_n_{n}.csv", index=False)
 
-    pd.DataFrame(mu_ecme).to_csv(f"./results/mu_ECME_nrep_{n_rep}_n_{n}.csv", index=False)
-    pd.DataFrame(gamma_ecme).to_csv(f"./results/gamma_ECME_nrep_{n_rep}_n_{n}.csv", index=False)
-    #pd.DataFrame(coverage_ECME).to_csv(f"./results/coverage_ECME_nrep_{n_rep}_n_{n}.csv", index=False)
-    #pd.DataFrame(interq_ECME).to_csv(f"./results/interq_ECME_nrep_{n_rep}_n_{n}.csv", index=False)
+    # pd.DataFrame(mu_ecme).to_csv(f"./results_10092026/mu_ECME_nrep_{n_rep}_n_{n}.csv", index=False)
+    # pd.DataFrame(gamma_ecme).to_csv(f"./results_10092026/gamma_ECME_nrep_{n_rep}_n_{n}.csv", index=False)
+    # #pd.DataFrame(coverage_ECME).to_csv(f"./results/coverage_ECME_nrep_{n_rep}_n_{n}.csv", index=False)
+    # #pd.DataFrame(interq_ECME).to_csv(f"./results/interq_ECME_nrep_{n_rep}_n_{n}.csv", index=False)
 
-    pd.DataFrame(mu_reml).to_csv(f"./results/mu_REML_nrep_{n_rep}_n_{n}.csv", index=False)
-    pd.DataFrame(gamma_reml).to_csv(f"./results/gamma_REML_nrep_{n_rep}_n_{n}.csv", index=False)
-    #pd.DataFrame(coverage_REML).to_csv(f"./results/coverage_REML_nrep_{n_rep}_n_{n}.csv", index=False)
-    #pd.DataFrame(interq_REML).to_csv(f"./results/interq_REML_nrep_{n_rep}_n_{n}.csv", index=False)
+    # pd.DataFrame(mu_reml).to_csv(f"./results_10092026/mu_REML_nrep_{n_rep}_n_{n}.csv", index=False)
+    # pd.DataFrame(gamma_reml).to_csv(f"./results_10092026/gamma_REML_nrep_{n_rep}_n_{n}.csv", index=False)
+    # #pd.DataFrame(coverage_REML).to_csv(f"./results/coverage_REML_nrep_{n_rep}_n_{n}.csv", index=False)
+    # #pd.DataFrame(interq_REML).to_csv(f"./results/interq_REML_nrep_{n_rep}_n_{n}.csv", index=False)
 
-    pd.DataFrame(mu_profile).to_csv(f"./results/mu_profile_nrep_{n_rep}_n_{n}.csv", index=False)
-    pd.DataFrame(gamma_profile).to_csv(f"./results/gamma_profile_nrep_{n_rep}_n_{n}.csv", index=False)
-    #pd.DataFrame(coverage_profile).to_csv(f"./results/coverage_profile_nrep_{n_rep}_n_{n}.csv", index=False)
-    #pd.DataFrame(interq_profile).to_csv(f"./results/interq_profile_nrep_{n_rep}_n_{n}.csv", index=False)
+    # pd.DataFrame(mu_profile).to_csv(f"./results_10092026/mu_profile_nrep_{n_rep}_n_{n}.csv", index=False)
+    # pd.DataFrame(gamma_profile).to_csv(f"./results_10092026/gamma_profile_nrep_{n_rep}_n_{n}.csv", index=False)
+    # #pd.DataFrame(coverage_profile).to_csv(f"./results/coverage_profile_nrep_{n_rep}_n_{n}.csv", index=False)
+    # #pd.DataFrame(interq_profile).to_csv(f"./results/interq_profile_nrep_{n_rep}_n_{n}.csv", index=False)
 
 
 # sig_eps = np.random.normal(0, 4, n)
